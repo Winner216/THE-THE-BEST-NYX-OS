@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Sun Glow (Catppuccin Yellow/Peach) -->
+    <linearGradient id="sunGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f9e2af" />
+      <stop offset="100%" stop-color="#fab387" />
+    </linearGradient>
+
+    <!-- Cloud Glow (Catppuccin Blue/Lavender) -->
+    <linearGradient id="cloudGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#b4befe" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.463) translate(-267,-281)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Sun Rays (behind cloud, upper-right) -->
+  <line x1="352" y1="158" x2="352" y2="178" stroke="url(#sunGlow)" stroke-width="12" stroke-linecap="round" />
+  <line x1="392" y1="182" x2="378" y2="196" stroke="url(#sunGlow)" stroke-width="12" stroke-linecap="round" />
+  <line x1="322" y1="182" x2="336" y2="196" stroke="url(#sunGlow)" stroke-width="12" stroke-linecap="round" />
+  <line x1="408" y1="222" x2="388" y2="222" stroke="url(#sunGlow)" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Sun Core -->
+  <circle cx="352" cy="222" r="44" fill="url(#sunGlow)" />
+
+  <!-- Cloud Base -->
+  <path d="M 120 360
+           C 120 330, 145 310, 175 310
+           C 185 280, 220 260, 256 260
+           C 292 260, 327 280, 337 310
+           C 367 310, 392 330, 392 360
+           C 392 390, 367 410, 337 410
+           L 175 410
+           C 145 410, 120 390, 120 360 Z"
+        fill="url(#cloudGlow)" />
+
+  <!-- Cloud Detail Line (slight shading) -->
+  <path d="M 150 350 C 180 335, 320 330, 362 350" fill="none" stroke="#1e1e2e" stroke-width="8" stroke-linecap="round" opacity="0.35" />
+
+  </g>
+</svg>

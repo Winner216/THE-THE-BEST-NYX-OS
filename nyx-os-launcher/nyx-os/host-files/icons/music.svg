@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Music Notes (Catppuccin Pink/Mauve) -->
+    <linearGradient id="musicGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5c2e7" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+
+    <!-- Accent Glow for Sound Waves (Catppuccin Teal/Sapphire) -->
+    <linearGradient id="waveGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94e2d5" />
+      <stop offset="100%" stop-color="#74c7ec" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.344) translate(-255,-262)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Background Sound Wave Lines -->
+  <line x1="100" y1="270" x2="100" y2="310" stroke="url(#waveGlow)" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+  <line x1="125" y1="240" x2="125" y2="340" stroke="url(#waveGlow)" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+  <line x1="385" y1="220" x2="385" y2="320" stroke="url(#waveGlow)" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+  <line x1="410" y1="250" x2="410" y2="290" stroke="url(#waveGlow)" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+
+  <!-- Integrated Music Note Path -->
+  <!-- Left Note Head -->
+  <ellipse cx="180" cy="365" rx="32" ry="24" transform="rotate(-20 180 365)" fill="url(#musicGlow)" />
+  <!-- Right Note Head -->
+  <ellipse cx="310" cy="315" rx="32" ry="24" transform="rotate(-20 310 315)" fill="url(#musicGlow)" />
+
+  <!-- Note Stems & Beam as Unified Path -->
+  <path d="M 194 365 L 194 200 L 338 150 L 338 315 L 322 315 L 322 178 L 210 216 L 210 365 Z" fill="url(#musicGlow)" />
+  <!-- Beam Top Extension for Style -->
+  <polygon points="194,185 338,135 338,155 194,205" fill="url(#musicGlow)" />
+
+  </g>
+</svg>

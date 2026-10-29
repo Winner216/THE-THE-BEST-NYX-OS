@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Gradient for Paint Palette (Catppuccin Peach/Yellow) -->
+    <linearGradient id="paletteGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f9e2af" />
+      <stop offset="100%" stop-color="#fab387" />
+    </linearGradient>
+
+    <!-- Gradient for Brush Handle (Catppuccin Rosewater/Pink) -->
+    <linearGradient id="brushGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5e0dc" />
+      <stop offset="100%" stop-color="#f5c2e7" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.438) translate(-260.5,-283)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Artist Palette Path -->
+  <path d="M 160 380 C 100 350, 100 240, 180 180 C 260 120, 380 140, 400 220 C 420 300, 350 380, 270 380 C 250 380, 240 360, 220 360 C 200 360, 190 395, 160 380 Z" 
+        fill="none" stroke="url(#paletteGlow)" stroke-width="14" stroke-linejoin="round" stroke-linecap="round" />
+
+  <!-- Palette Thumb Hole -->
+  <circle cx="200" cy="320" r="18" fill="none" stroke="url(#paletteGlow)" stroke-width="10" />
+
+  <!-- Paint Swatches / Blobs -->
+  <circle cx="180" cy="220" r="16" fill="#f38ba8" /> <!-- Red/Pink -->
+  <circle cx="230" cy="180" r="16" fill="#f9e2af" /> <!-- Yellow -->
+  <circle cx="300" cy="175" r="16" fill="#a6e3a1" /> <!-- Green -->
+  <circle cx="360" cy="210" r="16" fill="#89dceb" /> <!-- Sapphire -->
+  <circle cx="380" cy="275" r="16" fill="#cba6f7" /> <!-- Mauve -->
+
+  <!-- Paint Brush -->
+  <!-- Brush Handle -->
+  <path d="M 120 420 L 260 280" stroke="url(#brushGlow)" stroke-width="16" stroke-linecap="round" />
+  <!-- Ferrule (Metal Ring) -->
+  <line x1="250" y1="290" x2="270" y2="270" stroke="#89b4fa" stroke-width="18" stroke-linecap="round" />
+  <!-- Brush Tip / Bristles -->
+  <path d="M 270 270 C 285 255, 305 245, 315 250 C 320 260, 310 280, 295 295 Z" fill="#f5c2e7" />
+
+  </g>
+</svg>

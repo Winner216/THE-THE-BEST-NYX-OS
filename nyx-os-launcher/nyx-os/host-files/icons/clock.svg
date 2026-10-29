@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Clock Face (Catppuccin Blue/Sky) -->
+    <linearGradient id="clockGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#74c7ec" />
+    </linearGradient>
+
+    <!-- Hand Accent (Catppuccin Teal) -->
+    <linearGradient id="handGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#94e2d5" />
+      <stop offset="100%" stop-color="#89dceb" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.569) translate(-256,-288)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Clock Face Outer Ring -->
+  <circle cx="256" cy="288" r="130" fill="none" stroke="url(#clockGlow)" stroke-width="14" />
+
+  <!-- Hour Tick Marks (12, 3, 6, 9 highlighted) -->
+  <line x1="256" y1="178" x2="256" y2="198" stroke="#a6adc8" stroke-width="10" stroke-linecap="round" />
+  <line x1="366" y1="288" x2="346" y2="288" stroke="#a6adc8" stroke-width="10" stroke-linecap="round" />
+  <line x1="256" y1="398" x2="256" y2="378" stroke="#a6adc8" stroke-width="10" stroke-linecap="round" />
+  <line x1="146" y1="288" x2="166" y2="288" stroke="#a6adc8" stroke-width="10" stroke-linecap="round" />
+
+  <!-- Hour Hand (pointing to ~10 o'clock) -->
+  <line x1="256" y1="288" x2="206" y2="238" stroke="url(#handGlow)" stroke-width="14" stroke-linecap="round" />
+
+  <!-- Minute Hand (pointing to ~2 o'clock) -->
+  <line x1="256" y1="288" x2="320" y2="228" stroke="url(#clockGlow)" stroke-width="10" stroke-linecap="round" />
+
+  <!-- Center Hub -->
+  <circle cx="256" cy="288" r="16" fill="#cdd6f4" />
+
+  </g>
+</svg>

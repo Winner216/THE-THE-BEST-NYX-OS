@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Organizer/Calendar (Catppuccin Green/Teal) -->
+    <linearGradient id="organizerGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a6e3a1" />
+      <stop offset="100%" stop-color="#94e2d5" />
+    </linearGradient>
+
+    <!-- Glowing Accent for Checkmarks / Details (Catppuccin Peach/Yellow) -->
+    <linearGradient id="accentGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fab387" />
+      <stop offset="100%" stop-color="#f9e2af" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.414) translate(-256,-286)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Calendar Outer Frame -->
+  <rect x="112" y="180" width="288" height="236" rx="24" fill="none" stroke="url(#organizerGlow)" stroke-width="16" stroke-linejoin="round" />
+
+  <!-- Calendar Top Header Bar Line -->
+  <line x1="112" y1="240" x2="400" y2="240" stroke="url(#organizerGlow)" stroke-width="12" />
+
+  <!-- Binder Rings on Top -->
+  <line x1="180" y1="155" x2="180" y2="195" stroke="#cdd6f4" stroke-width="14" stroke-linecap="round" />
+  <line x1="256" y1="155" x2="256" y2="195" stroke="#cdd6f4" stroke-width="14" stroke-linecap="round" />
+  <line x1="332" y1="155" x2="332" y2="195" stroke="#cdd6f4" stroke-width="14" stroke-linecap="round" />
+
+  <!-- Checklist Items Inside -->
+  <!-- Checkmark 1 -->
+  <path d="M 152 285 L 170 303 L 205 268" fill="none" stroke="url(#accentGlow)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="228" y1="285" x2="352" y2="285" stroke="#cdd6f4" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Checkmark 2 -->
+  <path d="M 152 350 L 170 368 L 205 333" fill="none" stroke="url(#accentGlow)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="228" y1="350" x2="320" y2="350" stroke="#45475a" stroke-width="12" stroke-linecap="round" />
+
+  </g>
+</svg>

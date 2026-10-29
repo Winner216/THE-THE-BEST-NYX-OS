@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Pencil (Catppuccin Lavender/Mauve) -->
+    <linearGradient id="pencilGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b4befe" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+
+    <!-- Eraser / Wood Detail (Catppuccin Peach) -->
+    <linearGradient id="eraserGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fab387" />
+      <stop offset="100%" stop-color="#f9e2af" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.443) translate(-259,-288)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Pencil Icon (Horizontal: tip left, eraser right, centered) -->
+  <!-- Pencil Tip (Triangle, pointing left) -->
+  <path d="M 110 258 L 175 288 L 110 318 Z" fill="url(#pencilGlow)" />
+
+  <!-- Pencil Body -->
+  <rect x="175" y="258" width="180" height="60" rx="12" fill="none" stroke="url(#pencilGlow)" stroke-width="16" />
+
+  <!-- Lead Detail Line (inside tip) -->
+  <line x1="128" y1="274" x2="162" y2="288" stroke="#1e1e2e" stroke-width="8" stroke-linecap="round" />
+
+  <!-- Wood/Ferrule band -->
+  <line x1="352" y1="258" x2="352" y2="318" stroke="#585b70" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Eraser -->
+  <rect x="368" y="262" width="34" height="52" rx="9" fill="none" stroke="url(#eraserGlow)" stroke-width="12" />
+
+  </g>
+</svg>

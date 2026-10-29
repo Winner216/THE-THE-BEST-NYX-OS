@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Clock Dial (Catppuccin Blue/Sky) -->
+    <linearGradient id="clockGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#89dceb" />
+    </linearGradient>
+
+    <!-- Accent Glow for Hands (Catppuccin Rosewater/Peach) -->
+    <linearGradient id="handGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5e0dc" />
+      <stop offset="100%" stop-color="#fab387" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.581) translate(-256,-300)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Clock Face Circle -->
+  <circle cx="256" cy="300" r="130" fill="none" stroke="url(#clockGlow)" stroke-width="12" />
+
+  <!-- Hour Ticks (12, 3, 6, 9 o'clock) -->
+  <line x1="256" y1="182" x2="256" y2="198" stroke="url(#clockGlow)" stroke-width="8" stroke-linecap="round" />
+  <line x1="374" y1="300" x2="358" y2="300" stroke="url(#clockGlow)" stroke-width="8" stroke-linecap="round" />
+  <line x1="256" y1="418" x2="256" y2="402" stroke="url(#clockGlow)" stroke-width="8" stroke-linecap="round" />
+  <line x1="138" y1="300" x2="154" y2="300" stroke="url(#clockGlow)" stroke-width="8" stroke-linecap="round" />
+
+  <!-- Hour Hand (pointing toward 10 o'clock) -->
+  <line x1="256" y1="300" x2="200" y2="244" stroke="url(#handGlow)" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Minute Hand (pointing toward 2 o'clock) -->
+  <line x1="256" y1="300" x2="330" y2="226" stroke="url(#handGlow)" stroke-width="10" stroke-linecap="round" />
+
+  <!-- Second Hand (pointing toward 6 o'clock) -->
+  <line x1="256" y1="300" x2="256" y2="380" stroke="#f38ba8" stroke-width="6" stroke-linecap="round" />
+
+  <!-- Center Pin -->
+  <circle cx="256" cy="300" r="10" fill="#f5e0dc" />
+  <circle cx="256" cy="300" r="4" fill="#1e1e2e" />
+
+  </g>
+</svg>

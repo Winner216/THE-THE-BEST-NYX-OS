@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Security Shield (Catppuccin Red/Maroon) -->
+    <linearGradient id="shieldGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f38ba8" />
+      <stop offset="100%" stop-color="#eba0ac" />
+    </linearGradient>
+
+    <!-- Glowing Accent for Keyhole / Lock (Catppuccin Yellow/Peach) -->
+    <linearGradient id="lockGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f9e2af" />
+      <stop offset="100%" stop-color="#fab387" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1) translate(-256,-216.5)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Security Shield Outer Path -->
+  <path d="M 256 165
+           C 310 165, 360 180, 380 195
+           C 380 290, 340 375, 256 425
+           C 172 375, 132 290, 132 195
+           C 152 180, 202 165, 256 165 Z"
+        fill="none" stroke="url(#shieldGlow)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Lock Shackle -->
+  <path d="M 226 270 V 245 C 226 228, 239 215, 256 215 C 273 215, 286 228, 286 245 V 270"
+        fill="none" stroke="url(#lockGlow)" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Lock Body -->
+  <rect x="216" y="270" width="80" height="65" rx="12" fill="url(#lockGlow)" />
+
+  <!-- Keyhole detail -->
+  <circle cx="256" cy="295" r="7" fill="#1e1e2e" />
+  <polygon points="253,295 259,295 261,318 251,318" fill="#1e1e2e" />
+
+  </g>
+</svg>

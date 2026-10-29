@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Settings Gear (Catppuccin Blue/Lavender) -->
+    <linearGradient id="gearGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#b4befe" />
+    </linearGradient>
+
+    <!-- Inner Glow for Sliders / Accents (Catppuccin Teal) -->
+    <linearGradient id="sliderGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94e2d5" />
+      <stop offset="100%" stop-color="#a6e3a1" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.641) translate(-256,-330.5)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Primary Gear Icon Center -->
+  <g transform="translate(256, 300)">
+    <!-- Gear Outer Teeth Path -->
+    <path d="
+      M -22 -110 L 22 -110 L 28 -82 C 38 -78 48 -72 57 -65 L 83 -78 L 114 -47 L 101 -21 C 108 -12 114 -2 118 8 L 146 14 L 146 58 L 118 64 C 114 74 108 84 101 93 L 114 119 L 83 150 L 57 137 C 48 144 38 150 28 154 L 22 182 L -22 182 L -28 154 C -38 150 -48 144 -57 137 L -83 150 L -114 119 L -101 93 C -108 84 -114 74 -118 64 L -146 58 L -146 14 L -118 8 C -114 -2 -108 -12 -101 -21 L -114 -47 L -83 -78 L -57 -65 C -48 -72 -38 -78 -28 -82 Z
+    " fill="none" stroke="url(#gearGlow)" stroke-width="16" stroke-linejoin="round" stroke-linecap="round" transform="scale(0.85)" />
+
+    <!-- Gear Center Circle -->
+    <circle cx="0" cy="0" r="42" fill="none" stroke="url(#gearGlow)" stroke-width="16" />
+
+    <!-- Slider Detail Inside -->
+    <line x1="-20" y1="0" x2="20" y2="0" stroke="url(#sliderGlow)" stroke-width="10" stroke-linecap="round" />
+  </g>
+
+  </g>
+</svg>

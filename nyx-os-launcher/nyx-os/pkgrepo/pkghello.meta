@@ -1,0 +1,3 @@
+version: 1.0
+author: Nyx Core
+desc: Ring-3 hello — prints its pid and ticks, then exits.

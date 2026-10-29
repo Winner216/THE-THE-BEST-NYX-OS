@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+    
+    <!-- Accent Glow -->
+    <linearGradient id="promptGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a6e3a1" />
+      <stop offset="100%" stop-color="#94e2d5" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(2.108) translate(-190,-256)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Prompt Command Line (>_) -->
+  <!-- Arrow '>' -->
+  <path d="M 100 200 L 170 256 L 100 312" fill="none" stroke="url(#promptGlow)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+  
+  <!-- Cursor '_' -->
+  <line x1="200" y1="312" x2="280" y2="312" stroke="#cdd6f4" stroke-width="24" stroke-linecap="round" />
+
+  </g>
+</svg>

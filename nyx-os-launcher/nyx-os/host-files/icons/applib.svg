@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Grid Outline / Search (Catppuccin Sapphire/Teal) -->
+    <linearGradient id="gridGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#74c7ec" />
+      <stop offset="100%" stop-color="#89dceb" />
+    </linearGradient>
+
+    <!-- Accent Glow for Main Grid Badges (Catppuccin Lavender/Mauve) -->
+    <linearGradient id="appGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b4befe" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.514) translate(-256,-286)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- App Library 2x2 Grid Categories -->
+  <!-- Top Left App Tile -->
+  <rect x="120" y="160" width="110" height="110" rx="30" fill="none" stroke="url(#appGlow)" stroke-width="12" />
+  <circle cx="175" cy="215" r="16" fill="url(#appGlow)" />
+
+  <!-- Top Right App Tile -->
+  <rect x="282" y="160" width="110" height="110" rx="30" fill="none" stroke="url(#appGlow)" stroke-width="12" />
+  <rect x="317" y="195" width="40" height="40" rx="10" fill="url(#appGlow)" />
+
+  <!-- Bottom Left App Tile -->
+  <rect x="120" y="302" width="110" height="110" rx="30" fill="none" stroke="url(#appGlow)" stroke-width="12" />
+  <polygon points="175,337 192,367 158,367" fill="url(#appGlow)" />
+
+  <!-- Bottom Right Search / Discover Tile -->
+  <rect x="282" y="302" width="110" height="110" rx="30" fill="none" stroke="url(#gridGlow)" stroke-width="12" />
+  <!-- Magnifying Glass Inside -->
+  <circle cx="330" cy="350" r="18" fill="none" stroke="url(#gridGlow)" stroke-width="10" />
+  <line x1="343" y1="363" x2="358" y2="378" stroke="url(#gridGlow)" stroke-width="10" stroke-linecap="round" />
+
+  </g>
+</svg>

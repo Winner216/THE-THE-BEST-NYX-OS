@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Controller (Catppuccin Lavender/Mauve) -->
+    <linearGradient id="controllerGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#b4befe" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+
+    <!-- Glowing Accent for Action Buttons (Catppuccin Peach/Red) -->
+    <linearGradient id="actionGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fab387" />
+      <stop offset="100%" stop-color="#f38ba8" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.156) translate(-256,-315)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Gamepad Icon Body (Abstracted) -->
+  <path d="M 160 210
+           C 110 210, 80 250, 80 300
+           C 80 370, 130 420, 180 420
+           C 210 420, 230 400, 256 400
+           C 282 400, 302 420, 332 420
+           C 382 420, 432 370, 432 300
+           C 432 250, 402 210, 352 210
+           Z"
+        fill="none" stroke="url(#controllerGlow)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- D-Pad (Left Side) -->
+  <line x1="160" y1="280" x2="160" y2="350" stroke="#cdd6f4" stroke-width="16" stroke-linecap="round" />
+  <line x1="125" y1="315" x2="195" y2="315" stroke="#cdd6f4" stroke-width="16" stroke-linecap="round" />
+
+  <!-- Action Buttons (Right Side) -->
+  <circle cx="352" cy="285" r="18" fill="none" stroke="url(#actionGlow)" stroke-width="12" />
+  <circle cx="392" cy="315" r="18" fill="none" stroke="url(#actionGlow)" stroke-width="12" />
+  <circle cx="312" cy="315" r="18" fill="none" stroke="url(#actionGlow)" stroke-width="12" />
+  <circle cx="352" cy="345" r="18" fill="none" stroke="url(#actionGlow)" stroke-width="12" />
+
+  <!-- Menu/Start Buttons (Center) -->
+  <line x1="236" y1="315" x2="276" y2="315" stroke="#45475a" stroke-width="10" stroke-linecap="round" />
+
+  </g>
+</svg>

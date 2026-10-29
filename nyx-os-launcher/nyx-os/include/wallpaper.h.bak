@@ -1,0 +1,18 @@
+// include/wallpaper.h
+#ifndef WALLPAPER_H
+#define WALLPAPER_H
+
+#define WALLPAPER_COUNT 6
+
+typedef struct {
+    const char* name;
+    void (*draw)(void);
+} Wallpaper;
+
+extern const Wallpaper wallpapers[WALLPAPER_COUNT];
+extern int current_wallpaper;
+
+void wallpaper_draw(void);
+void wallpaper_draw_fast(void);
+
+#endif

@@ -1,0 +1,3 @@
+version: 1.0
+author: Nyx Core
+desc: Game of Life — 40 generations of Conway's life as ASCII animation on COM1.

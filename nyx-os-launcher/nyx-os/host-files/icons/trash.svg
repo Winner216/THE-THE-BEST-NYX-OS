@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Trash Can Body (Catppuccin Red/Maroon) -->
+    <linearGradient id="trashGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f38ba8" />
+      <stop offset="100%" stop-color="#eba0ac" />
+    </linearGradient>
+
+    <!-- Glowing Accent for Lid / Handles (Catppuccin Peach) -->
+    <linearGradient id="lidGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fab387" />
+      <stop offset="100%" stop-color="#f9e2af" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.493) translate(-256,-303.5)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Trash Can Lid Top Handle -->
+  <path d="M 216 195 C 216 182, 228 170, 256 170 C 284 170, 296 182, 296 195" 
+        fill="none" stroke="url(#lidGlow)" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Trash Can Lid Rim -->
+  <line x1="120" y1="205" x2="392" y2="205" stroke="url(#lidGlow)" stroke-width="16" stroke-linecap="round" />
+
+  <!-- Trash Can Body -->
+  <path d="M 152 205 L 176 410 C 178 425, 192 435, 208 435 L 304 435 C 320 435, 334 425, 336 410 L 360 205" 
+        fill="none" stroke="url(#trashGlow)" stroke-width="16" stroke-linejoin="round" stroke-linecap="round" />
+
+  <!-- Trash Can Vertical Ribs -->
+  <line x1="216" y1="250" x2="224" y2="390" stroke="url(#trashGlow)" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+  <line x1="256" y1="250" x2="256" y2="390" stroke="url(#trashGlow)" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+  <line x1="296" y1="250" x2="288" y2="390" stroke="url(#trashGlow)" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+
+  </g>
+</svg>

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Calendar Card Frame (Catppuccin Red/Peach) -->
+    <linearGradient id="calHeaderGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f38ba8" />
+      <stop offset="100%" stop-color="#fab387" />
+    </linearGradient>
+
+    <!-- Accent Glow for Date Grid Highlight (Catppuccin Lavender/Mauve) -->
+    <linearGradient id="gridGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b4befe" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.433) translate(-256,-290.5)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Calendar Outer Sheet Base -->
+  <rect x="112" y="180" width="288" height="240" rx="24" fill="none" stroke="url(#calHeaderGlow)" stroke-width="12" />
+
+  <!-- Calendar Header Red/Peach Bar -->
+  <path d="M 112 204 C 112 190, 122 180, 136 180 L 376 180 C 390 180, 400 190, 400 204 L 400 230 L 112 230 Z" fill="url(#calHeaderGlow)" />
+
+  <!-- Calendar Binder Rings/Pegs -->
+  <line x1="180" y1="160" x2="180" y2="190" stroke="#f5e0dc" stroke-width="10" stroke-linecap="round" />
+  <line x1="332" y1="160" x2="332" y2="190" stroke="#f5e0dc" stroke-width="10" stroke-linecap="round" />
+
+  <!-- Calendar Date Dots/Grid -->
+  <!-- Row 1 -->
+  <circle cx="160" cy="270" r="8" fill="#585b70" />
+  <circle cx="208" cy="270" r="8" fill="#585b70" />
+  <circle cx="256" cy="270" r="8" fill="#f5e0dc" />
+  <circle cx="304" cy="270" r="8" fill="#f5e0dc" />
+  <circle cx="352" cy="270" r="8" fill="#f5e0dc" />
+
+  <!-- Row 2 -->
+  <circle cx="160" cy="315" r="8" fill="#f5e0dc" />
+  <circle cx="208" cy="315" r="8" fill="#f5e0dc" />
+  <!-- Active / Highlighted Day -->
+  <rect x="238" y="297" width="36" height="36" rx="12" fill="url(#gridGlow)" />
+  <circle cx="256" cy="315" r="6" fill="#1e1e2e" />
+  
+  <circle cx="304" cy="315" r="8" fill="#f5e0dc" />
+  <circle cx="352" cy="315" r="8" fill="#f5e0dc" />
+
+  <!-- Row 3 -->
+  <circle cx="160" cy="360" r="8" fill="#f5e0dc" />
+  <circle cx="208" cy="360" r="8" fill="#f5e0dc" />
+  <circle cx="256" cy="360" r="8" fill="#f5e0dc" />
+  <circle cx="304" cy="360" r="8" fill="#f5e0dc" />
+  <circle cx="352" cy="360" r="8" fill="#585b70" />
+
+  </g>
+</svg>

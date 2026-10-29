@@ -1,0 +1,1679 @@
+	// cpu/desktop.c
+#include <desktop.h>
+#include <terminal.h>
+#include <shell.h>
+#include <keyboard.h>
+#include <isr.h>
+#include <timezone.h>
+#include <rtc.h>
+#include <speaker.h>
+#include <music.h>
+#include <calc.h>
+#include <auth.h>
+#include <stdint.h>
+#include <fs.h>
+#include <games.h>
+#include <editor.h>
+#include <power.h>
+#include <paint.h>
+#include <wallpaper.h>
+#include <sysmon.h>
+#include <clock.h>
+#include <calendar.h>
+#include <theme.h>
+#include <weather.h>
+#include <applib.h>
+#include <screensaver.h>
+
+// ─── VGA (text-mode emulation layer: renders via VESA pixels when ─
+// ─── VESA is active, falls back to real VGA text memory otherwise)─
+#include <vesa.h>
+#define VGA_WIDTH   80
+#define VGA_HEIGHT  25
+#define VGA_MEM     ((uint16_t*)0xB8000)
+
+static inline uint8_t make_vga_color(uint8_t fg, uint8_t bg){return fg|bg<<4;}
+static inline uint16_t make_vga_entry(char c,uint8_t fg,uint8_t bg){
+    return (uint16_t)c|(uint16_t)make_vga_color(fg,bg)<<8;
+}
+
+// Standard 16-color VGA palette, mapped to 24-bit RGB for VESA rendering
+static const uint32_t vga16_rgb[16] = {
+    0x000000, // 0  black
+    0x0000AA, // 1  blue
+    0x00AA00, // 2  green
+    0x00AAAA, // 3  cyan
+    0xAA0000, // 4  red
+    0xAA00AA, // 5  magenta
+    0xAA5500, // 6  brown
+    0xAAAAAA, // 7  light grey
+    0x555555, // 8  dark grey
+    0x5555FF, // 9  light blue
+    0x55FF55, // 10 light green
+    0x55FFFF, // 11 light cyan
+    0xFF5555, // 12 light red
+    0xFF55FF, // 13 light magenta
+    0xFFFF55, // 14 yellow
+    0xFFFFFF, // 15 white
+};
+
+// Each VGA text cell maps to an 8x16 pixel block in VESA mode.
+// 80 cols * 8px = 640, 25 rows * 16px = 400 -- centered within larger
+// VESA resolutions (e.g. 1024x768) with a margin border.
+static int vga_emu_offset_x(void){
+    return ((int)vesa.width - VGA_WIDTH*8) / 2;
+}
+static int vga_emu_offset_y(void){
+    return ((int)vesa.height - VGA_HEIGHT*16) / 2;
+}
+
+static void vga_put(int x,int y,char c,uint8_t fg,uint8_t bg){
+    if(x<0||x>=VGA_WIDTH||y<0||y>=VGA_HEIGHT)return;
+
+    if (vesa.active) {
+        int ox = vga_emu_offset_x() + x*8;
+        int oy = vga_emu_offset_y() + y*16;
+        uint32_t fgc = vga16_rgb[fg & 0x0F];
+        uint32_t bgc = vga16_rgb[bg & 0x0F];
+        vesa_draw_char(ox, oy, c, fgc, bgc);
+        return;
+    }
+
+    VGA_MEM[y*VGA_WIDTH+x]=make_vga_entry(c,fg,bg);
+}
+static void vga_puts(int x,int y,const char*s,uint8_t fg,uint8_t bg){
+    for(int i=0;s[i];i++)vga_put(x+i,y,s[i],fg,bg);
+}
+static void vga_fill_row(int y,char c,uint8_t fg,uint8_t bg){
+    for(int x=0;x<VGA_WIDTH;x++)vga_put(x,y,c,fg,bg);
+}
+static void vga_fill_rect(int x,int y,int w,int h,char c,uint8_t fg,uint8_t bg){
+    for(int dy=0;dy<h;dy++)
+        for(int dx=0;dx<w;dx++)
+            vga_put(x+dx,y+dy,c,fg,bg);
+}
+static int str_len(const char*s){int i=0;while(s[i])i++;return i;}
+static void str_copy(char*dst,const char*src,int max){
+    int i=0;while(src[i]&&i<max-1){dst[i]=src[i];i++;}dst[i]='\0';
+}
+static int str_eq(const char*a,const char*b){
+    int i=0;while(a[i]&&b[i]&&a[i]==b[i])i++;return a[i]==b[i];
+}
+
+// ─── Theme shortcut ───────────────────────────────────────────────
+#define TH (theme_get())
+
+// ─── App names & modes for search ────────────────────────────────
+static const char* app_names[]={
+    "Terminal","Files","About","Editor","AppLib",
+    "Trash","Settings","Music","Calc","Games",
+    "Paint","Monitor","Clock","Calendar","Weather"
+};
+#define DESKTOP_APP_COUNT 15
+
+// ─── Forward declarations ─────────────────────────────────────────
+static void draw_settings_window(void);
+static void draw_files_window(void);
+static void draw_trash_window(void);
+static void draw_about_window(void);
+static void draw_terminal_window(void);
+static void draw_icons(void);
+static void draw_file_viewer(int file_idx);
+static void move_to_trash(int file_idx);
+static void restore_from_trash(int trash_idx);
+static void empty_trash(void);
+static void draw_users_window(void);
+static void do_launch(int icon_idx);
+
+// ─── State ────────────────────────────────────────────────────────
+int current_mode      = MODE_DESKTOP;
+int selected_icon     = 0;
+int selected_file     = 0;
+int viewing_file       = -1; // -1 = showing file list; else index into filesystem[] being viewed
+int about_tab          = 0;  // 0 = System Info, 1 = Credits
+int settings_selected = 0;
+int settings_section  = -1;
+int sound_volume      = 75;
+
+static int trash_count       = 0;
+static int settings_scroll   = 0;
+
+// Search
+static int  search_active = 0;
+static char search_query[32];
+static int  search_qpos   = 0;
+static int  search_results[15];
+static int  search_rcount = 0;
+
+// Terminal — real shell output buffer. The live input line itself
+// lives in keyboard.c's cmd_buffer/cmd_pos (it's the code that
+// actually receives every keystroke); this just captures output.
+static term_redirect_t term_buf;
+static int  term_initialized = 0;
+static int  term_scroll      = 0; // 0 = pinned to bottom (latest output)
+
+void desktop_terminal_clear(void) {
+    terminal_redirect_clear(&term_buf);
+}
+
+// Users
+static int  users_selected  = 0;
+static int  users_sub       = 0;
+static char u_new_name[17];
+static char u_new_pass[17];
+static char u_old_pass[17];
+static char u_confirm[17];
+static int  u_field         = 0;
+static int  u_name_pos      = 0;
+static int  u_pass_pos      = 0;
+static int  u_old_pos       = 0;
+static int  u_confirm_pos   = 0;
+static char u_msg[48];
+
+#define MAX_TRASH 16
+static File trash[MAX_TRASH];
+
+// ─── Launch helper ────────────────────────────────────────────────
+static void do_launch(int idx){
+    speaker_beep_high();
+    switch(idx){
+        case 0:  current_mode=MODE_TERMINAL; break;
+        case 1:  current_mode=MODE_FILES;    break;
+        case 2:  current_mode=MODE_ABOUT;    break;
+        case 3:  editor_init();   current_mode=MODE_EDITOR;   break;
+        case 4:  applib_init();   current_mode=MODE_APPLIB;   break;
+        case 5:  current_mode=MODE_TRASH;    break;
+        case 6:  current_mode=MODE_SETTINGS; break;
+        case 7:  current_mode=MODE_MUSIC;    break;
+        case 8:  calc_init();     current_mode=MODE_CALC;     break;
+        case 9:  games_init();    current_mode=MODE_GAMES;    break;
+        case 10: paint_init();    current_mode=MODE_PAINT;    break;
+        case 11: sysmon_init();   current_mode=MODE_SYSMON;   break;
+        case 12: clock_init();    current_mode=MODE_CLOCK;    break;
+        case 13: calendar_init(); current_mode=MODE_CALENDAR; break;
+        case 14: current_mode=MODE_WEATHER; break;
+    }
+}
+
+// ─── Search helpers ───────────────────────────────────────────────
+static void do_search(){
+    search_rcount=0;
+    if(!search_query[0]) return;
+    for(int i=0;i<DESKTOP_APP_COUNT;i++){
+        const char*name=app_names[i];
+        const char*q=search_query;
+        int nl=str_len(name),ql=str_len(q);
+        if(ql>nl) continue;
+        for(int j=0;j<=nl-ql;j++){
+            int ok=1;
+            for(int k=0;k<ql;k++){
+                char nc=name[j+k],qc=q[k];
+                if(nc>='A'&&nc<='Z')nc+=32;
+                if(qc>='A'&&qc<='Z')qc+=32;
+                if(nc!=qc){ok=0;break;}
+            }
+            if(ok){search_results[search_rcount++]=i;break;}
+        }
+        if(search_rcount>=8) break;
+    }
+}
+
+static void draw_search_bar(){
+    const Theme*t=TH;
+    vga_fill_rect(5,9,70,3,' ',15,1);
+    for(int x=5;x<75;x++){vga_put(x,9,'-',t->accent,1);vga_put(x,11,'-',t->accent,1);}
+    for(int y=9;y<=11;y++){vga_put(5,y,'|',t->accent,1);vga_put(74,y,'|',t->accent,1);}
+    vga_put(5,9,'+',t->accent,1);vga_put(74,9,'+',t->accent,1);
+    vga_put(5,11,'+',t->accent,1);vga_put(74,11,'+',t->accent,1);
+    vga_puts(7,9,"[ Search Apps - type to filter ]",t->accent,1);
+
+    vga_fill_rect(7,10,50,1,' ',0,7);
+    vga_puts(7,10,search_query,0,7);
+    vga_put(7+search_qpos,10,'_',0,15);
+    vga_puts(59,10,"ESC:close",7,1);
+
+    if(search_rcount>0){
+        int ry=12;
+        vga_fill_rect(5,ry,70,search_rcount+2,' ',15,8);
+        for(int x=5;x<75;x++){vga_put(x,ry,'-',8,8);vga_put(x,ry+search_rcount+1,'-',8,8);}
+        for(int y=ry;y<=ry+search_rcount+1;y++){vga_put(5,y,'|',8,8);vga_put(74,y,'|',8,8);}
+        for(int i=0;i<search_rcount;i++){
+            int ai=search_results[i];
+            uint8_t fg=(i==selected_icon)?0:15;
+            uint8_t bg=(i==selected_icon)?t->highlight:8;
+            vga_fill_rect(6,ry+1+i,68,1,' ',fg,bg);
+            vga_puts(8,ry+1+i,app_names[ai],fg,bg);
+            vga_puts(22,ry+1+i,"- ENTER to open",fg,bg);
+        }
+    } else if(search_query[0]){
+        vga_fill_rect(5,12,70,3,' ',8,8);
+        vga_puts(20,13,"No apps found. Try a different name.",8,8);
+    }
+}
+
+// ─── Taskbar ─────────────────────────────────────────────────────
+static void draw_taskbar(){
+    const Theme*t=TH;
+
+    if (vesa.active) {
+        int W = (int)vesa.width;
+        int bar_h = 32;
+
+        // Background bar, pinned to the literal top of the screen
+        vesa_fill_rect(0, 0, W, bar_h, 0x1A1140);
+        vesa_hline(0, bar_h-1, W, 0xB088FF);
+        vesa_hline(0, bar_h-2, W, 0x6A4FBF);
+
+        // Logo + username, left side
+        vesa_draw_string(12, 8, "* Nyx OS", 0xB088FF, 0);
+        if (logged_in_user >= 0)
+            vesa_draw_string(110, 8, users[logged_in_user].username, 0xE8D8FF, 0);
+
+        // Date + time, right side
+        char time_str[9]; char date_str[9];
+        rtc_get_time_str(time_str); rtc_get_date_str(date_str);
+        vesa_draw_string(W-200, 8, date_str, 0xC8B8E0, 0);
+        vesa_draw_string(W-110, 8, time_str, 0xB088FF, 0);
+
+        // Power indicator, far right
+        vesa_draw_string(W-44, 8, "[PWR]", 0xFF6B6B, 0);
+        return;
+    }
+
+    // ── VGA text fallback ──
+    vga_fill_row(0,' ',t->taskbar_fg,t->taskbar_bg);
+    vga_puts(1,0,"* Nyx OS",t->taskbar_accent,t->taskbar_bg);
+    if(logged_in_user>=0)
+        vga_puts(11,0,users[logged_in_user].username,t->taskbar_fg,t->taskbar_bg);
+    char time_str[9];char date_str[9];
+    rtc_get_time_str(time_str);rtc_get_date_str(date_str);
+    vga_puts(52,0,date_str,t->taskbar_fg,t->taskbar_bg);
+    vga_put(60,0,' ',t->taskbar_fg,t->taskbar_bg);
+    vga_puts(61,0,time_str,t->taskbar_accent,t->taskbar_bg);
+    vga_puts(75,0,"[PWR]",t->danger,t->taskbar_bg);
+}
+
+static void draw_wallpaper(){
+    wallpaper_draw();
+}
+
+static void draw_statusbar(){
+    const Theme*t=TH;
+
+    if (vesa.active) {
+        int W = (int)vesa.width;
+        int H = (int)vesa.height;
+        int bar_h = 28;
+        int by = H - bar_h;
+
+        vesa_fill_rect(0, by, W, bar_h, 0x1A1140);
+        vesa_hline(0, by, W, 0xB088FF);
+        vesa_hline(0, by+1, W, 0x6A4FBF);
+
+        const char* label = "Nyx v0.1";
+        int lw = str_len(label) * 8;
+        vesa_draw_string(W - lw - 16, by + 6, label, 0xB088FF, 0);
+        return;
+    }
+
+    // ── VGA text fallback ──
+    vga_fill_row(VGA_HEIGHT-1,' ',t->status_fg,t->status_bg);
+    vga_puts(66,VGA_HEIGHT-1,"Nyx v0.1",t->accent,t->status_bg);
+}
+
+// ─── Icon grid (pixel-drawn tiles) ─────────────────────────────────
+// Each icon used to be ASCII text in brackets (e.g. "[$_]") rendered
+// through the VGA-text-emulation layer. That reads as "blocky" next
+// to the smooth lunar logo on the splash/login screens, so icons are
+// now drawn as real pixel tiles: a rounded gradient box with a top
+// light-sheen, a thin glowing border, and a hand-drawn line-art
+// symbol unique to each app. Labels stay on the character grid,
+// since text is what that grid renders best.
+
+// Per-icon accent color, now full 24-bit RGB (no longer constrained
+// to the 16-color VGA palette) so the line art can glow properly.
+static const uint32_t icon_glyph_rgb[]={
+    0x7FE8C8, // Terminal  - mint green
+    0xFFD166, // Files     - warm yellow
+    0x8FC4FF, // About     - sky blue
+    0xFF9FD6, // Editor    - pink
+    0x8FF0A8, // AppLib    - light green
+    0xFF8FA0, // Trash     - coral red
+    0xC8C8E0, // Settings  - cool grey
+    0xE0A8FF, // Music     - lavender
+    0x8FE0FF, // Calc      - cyan
+    0xFFB088, // Games     - orange
+    0x8FC4FF, // Paint     - sky blue
+    0x9FFFC8, // Monitor   - mint
+    0x8FE8FF, // Clock     - cyan
+    0xE0A8FF, // Calendar  - lavender
+    0x8FC4FF, // Weather   - sky blue
+};
+
+// ── Pixel primitives (local to icon drawing) ───────────────────────
+static void icon_circ(int cx,int cy,int r,uint32_t c){
+    for(int dy=-r;dy<=r;dy++)
+        for(int dx=-r;dx<=r;dx++)
+            if(dx*dx+dy*dy<=r*r)
+                vesa_put_pixel(cx+dx,cy+dy,c);
+}
+static void icon_ring(int cx,int cy,int r,int t,uint32_t c){
+    int ri=r-t;
+    for(int dy=-r;dy<=r;dy++)
+        for(int dx=-r;dx<=r;dx++){
+            int d=dx*dx+dy*dy;
+            if(d<=r*r&&d>=ri*ri)
+                vesa_put_pixel(cx+dx,cy+dy,c);
+        }
+}
+// Thick line via Bresenham-ish stepping + a small square stamp,
+// since we have no native line primitive with width.
+static void icon_line(int x0,int y0,int x1,int y1,int w,uint32_t c){
+    int dx=x1-x0, dy=y1-y0;
+    int steps = (dx<0?-dx:dx) > (dy<0?-dy:dy) ? (dx<0?-dx:dx) : (dy<0?-dy:dy);
+    if (steps==0) steps=1;
+    int hw = w/2; if (hw<1) hw=1;
+    for(int i=0;i<=steps;i++){
+        int x = x0 + dx*i/steps;
+        int y = y0 + dy*i/steps;
+        for(int oy=-hw;oy<=hw;oy++)
+            for(int ox=-hw;ox<=hw;ox++)
+                vesa_put_pixel(x+ox,y+oy,c);
+    }
+}
+static void icon_rrect_border(int x,int y,int w,int h,uint32_t c){
+    vesa_hline(x+2,y,w-4,c); vesa_hline(x+2,y+h-1,w-4,c);
+    vesa_vline(x,y+2,h-4,c); vesa_vline(x+w-1,y+2,h-4,c);
+    vesa_put_pixel(x+1,y+1,c);   vesa_put_pixel(x+w-2,y+1,c);
+    vesa_put_pixel(x+1,y+h-2,c); vesa_put_pixel(x+w-2,y+h-2,c);
+}
+// Rounded-corner vertical gradient: combines the corner-cut shape
+// of icon_rrect with a top-to-bottom color blend in a single pass,
+// so the tile body is both rounded AND gradient-filled (rather than
+// a sharp rectangle, which icon_hgrad alone would produce).
+static void icon_rrect_grad(int x,int y,int w,int h,uint32_t c1,uint32_t c2){
+    for(int dy=0;dy<h;dy++){
+        uint32_t r=((c1>>16)&0xFF)+(int)(((c2>>16)&0xFF)-((c1>>16)&0xFF))*dy/h;
+        uint32_t g=((c1>>8)&0xFF)+(int)(((c2>>8)&0xFF)-((c1>>8)&0xFF))*dy/h;
+        uint32_t b=(c1&0xFF)+(int)((c2&0xFF)-(c1&0xFF))*dy/h;
+        uint32_t col=(r<<16)|(g<<8)|b;
+        // Inset the row by 2px on the corner rows (top/bottom 2px),
+        // matching icon_rrect's corner-cut pattern.
+        if (dy < 2 || dy >= h-2)
+            vesa_hline(x+2,y+dy,w-4,col);
+        else
+            vesa_hline(x,y+dy,w,col);
+    }
+}
+
+// ── Symbol drawing: each app gets its own hand-drawn line-art icon.
+// Coordinates are relative to (cx,cy) = the tile's center, on a
+// roughly -10..+10 canvas (tile is 32x32px, symbol fits ~24x24px).
+static void sym_terminal(int cx,int cy,uint32_t c){
+    icon_rrect_border(cx-11,cy-9,22,18,c);
+    icon_line(cx-6,cy-3,cx-2,cy,2,c);
+    icon_line(cx-2,cy,cx-6,cy+3,2,c);
+    icon_line(cx,cy+4,cx+6,cy+4,2,c);
+}
+static void sym_files(int cx,int cy,uint32_t c){
+    icon_line(cx-11,cy-5,cx-11,cy+8,2,c);
+    icon_line(cx-11,cy+8,cx+11,cy+8,2,c);
+    icon_line(cx+11,cy+8,cx+11,cy-1,2,c);
+    icon_line(cx+11,cy-1,cx,cy-1,2,c);
+    icon_line(cx,cy-1,cx-3,cy-5,2,c);
+    icon_line(cx-3,cy-5,cx-11,cy-5,2,c);
+}
+static void sym_about(int cx,int cy,uint32_t c){
+    icon_ring(cx,cy,10,2,c);
+    icon_circ(cx,cy-4,1,c);
+    icon_line(cx,cy-1,cx,cy+5,2,c);
+}
+static void sym_editor(int cx,int cy,uint32_t c){
+    icon_line(cx-8,cy+8,cx-7,cy+3,2,c);
+    icon_line(cx-7,cy+3,cx+5,cy-9,2,c);
+    icon_line(cx+5,cy-9,cx+9,cy-5,2,c);
+    icon_line(cx+9,cy-5,cx-3,cy+7,2,c);
+    icon_line(cx-3,cy+7,cx-8,cy+8,2,c);
+    icon_line(cx+2,cy-6,cx+6,cy-2,1,c);
+}
+static void sym_applib(int cx,int cy,uint32_t c){
+    icon_rrect_border(cx-10,cy-10,8,8,c);
+    icon_rrect_border(cx+2,cy-10,8,8,c);
+    icon_rrect_border(cx-10,cy+2,8,8,c);
+    icon_rrect_border(cx+2,cy+2,8,8,c);
+}
+static void sym_trash(int cx,int cy,uint32_t c){
+    icon_line(cx-7,cy-7,cx+7,cy-7,2,c);
+    icon_line(cx-3,cy-9,cx+3,cy-9,2,c);
+    icon_line(cx-6,cy-7,cx-5,cy+9,2,c);
+    icon_line(cx-5,cy+9,cx+5,cy+9,2,c);
+    icon_line(cx+5,cy+9,cx+6,cy-7,2,c);
+}
+static void sym_settings(int cx,int cy,uint32_t c){
+    icon_ring(cx,cy,5,2,c);
+    icon_line(cx,cy-9,cx,cy-6,2,c);
+    icon_line(cx,cy+6,cx,cy+9,2,c);
+    icon_line(cx-9,cy,cx-6,cy,2,c);
+    icon_line(cx+6,cy,cx+9,cy,2,c);
+    icon_line(cx-6,cy-6,cx-4,cy-4,2,c);
+    icon_line(cx+4,cy+4,cx+6,cy+6,2,c);
+    icon_line(cx-6,cy+6,cx-4,cy+4,2,c);
+    icon_line(cx+4,cy-4,cx+6,cy-6,2,c);
+}
+static void sym_music(int cx,int cy,uint32_t c){
+    icon_circ(cx-7,cy+6,3,c);
+    icon_circ(cx+6,cy+3,3,c);
+    icon_line(cx-4,cy+6,cx-4,cy-7,2,c);
+    icon_line(cx+9,cy+3,cx+9,cy-8,2,c);
+    icon_line(cx-4,cy-7,cx+9,cy-8,2,c);
+}
+static void sym_calc(int cx,int cy,uint32_t c){
+    icon_rrect_border(cx-10,cy-9,20,18,c);
+    icon_line(cx-10,cy-4,cx+10,cy-4,1,c);
+    icon_line(cx-4,cy-4,cx-4,cy+9,1,c);
+    icon_line(cx+2,cy-4,cx+2,cy+9,1,c);
+}
+static void sym_games(int cx,int cy,uint32_t c){
+    static const int sx[10]={0,3,10,5,7,0,-7,-5,-10,-3};
+    static const int sy[10]={-10,-3,-3,2,9,5,9,2,-3,-3};
+    for(int i=0;i<10;i++){
+        int j=(i+1)%10;
+        icon_line(cx+sx[i],cy+sy[i],cx+sx[j],cy+sy[j],1,c);
+    }
+}
+static void sym_paint(int cx,int cy,uint32_t c){
+    icon_line(cx-7,cy+9,cx-4,cy+3,2,c);
+    icon_line(cx-4,cy+3,cx+6,cy-8,2,c);
+    icon_line(cx+6,cy-8,cx+9,cy-5,2,c);
+    icon_line(cx+9,cy-5,cx-1,cy+6,2,c);
+    icon_line(cx-1,cy+6,cx-7,cy+9,2,c);
+    icon_circ(cx+6,cy-8,2,c);
+}
+static void sym_monitor(int cx,int cy,uint32_t c){
+    icon_rrect_border(cx-11,cy-8,22,14,c);
+    icon_line(cx-7,cy-9,cx+7,cy-9,1,c);
+    icon_line(cx-7,cy+2,cx-3,cy-3,1,c);
+    icon_line(cx-3,cy-3,cx+1,cy,1,c);
+    icon_line(cx+1,cy,cx+7,cy-6,1,c);
+    icon_line(cx-4,cy+9,cx+4,cy+9,2,c);
+}
+static void sym_clock(int cx,int cy,uint32_t c){
+    icon_ring(cx,cy,10,2,c);
+    icon_line(cx,cy,cx,cy-6,2,c);
+    icon_line(cx,cy,cx+4,cy+2,2,c);
+}
+static void sym_calendar(int cx,int cy,uint32_t c){
+    icon_rrect_border(cx-10,cy-7,20,17,c);
+    icon_line(cx-10,cy-2,cx+10,cy-2,1,c);
+    icon_line(cx-5,cy-10,cx-5,cy-5,2,c);
+    icon_line(cx+5,cy-10,cx+5,cy-5,2,c);
+}
+static void sym_weather(int cx,int cy,uint32_t c, uint32_t sun){
+    icon_ring(cx+5,cy-5,3,2,sun);
+    icon_line(cx-7,cy+8,cx-4,cy-1,2,c);
+    icon_line(cx-4,cy-1,cx+1,cy+1,2,c);
+    icon_line(cx+1,cy+1,cx+5,cy-3,2,c);
+    icon_line(cx+5,cy-3,cx+9,cy+8,2,c);
+    icon_line(cx-7,cy+8,cx+9,cy+8,2,c);
+}
+
+// Dispatch table: draws symbol #idx centered at (cx,cy) with glyph
+// color c. Weather needs a second color for the sun, so it's a
+// special case inside the switch rather than the function pointer.
+static void draw_icon_symbol(int idx,int cx,int cy,uint32_t c){
+    switch(idx){
+        case 0:  sym_terminal(cx,cy,c);   break;
+        case 1:  sym_files(cx,cy,c);      break;
+        case 2:  sym_about(cx,cy,c);      break;
+        case 3:  sym_editor(cx,cy,c);     break;
+        case 4:  sym_applib(cx,cy,c);     break;
+        case 5:  sym_trash(cx,cy,c);      break;
+        case 6:  sym_settings(cx,cy,c);   break;
+        case 7:  sym_music(cx,cy,c);      break;
+        case 8:  sym_calc(cx,cy,c);       break;
+        case 9:  sym_games(cx,cy,c);      break;
+        case 10: sym_paint(cx,cy,c);      break;
+        case 11: sym_monitor(cx,cy,c);    break;
+        case 12: sym_clock(cx,cy,c);      break;
+        case 13: sym_calendar(cx,cy,c);   break;
+        case 14: sym_weather(cx,cy,c,0xFFD166); break;
+        default: break;
+    }
+}
+
+static void draw_icon_px(int px,int py,int icon_idx,const char*label,int sel){
+    const Theme*t=TH;
+    uint32_t glyph = icon_glyph_rgb[icon_idx];
+
+    int tile_w = 64, tile_h = 64;
+    int cx = px + tile_w/2;
+    int cy = py + tile_h/2 - 2;
+
+    if (vesa.active) {
+        // Tile shadow
+        vesa_fill_rect(px+3, py+3, tile_w, tile_h, 0x05030C);
+
+        // Tile gradient body
+        uint32_t top    = sel ? 0x2E2050 : 0x1E1240;
+        uint32_t bottom = sel ? 0x1A1240 : 0x120A28;
+        icon_rrect_grad(px, py, tile_w, tile_h, top, bottom);
+
+        // Light sheen across the top third
+        for (int yy = 0; yy < tile_h/3; yy++) {
+            uint32_t a = 0x140A28 + (uint32_t)(tile_h/3 - yy) * 0x000402;
+            vesa_hline(px+6, py+yy, tile_w-12, a);
+        }
+
+        // Border: glowing if selected, subtle otherwise
+        uint32_t border = sel ? 0xB088FF : 0x4A3870;
+        icon_rrect_border(px, py, tile_w, tile_h, border);
+        if (sel) icon_rrect_border(px-1, py-1, tile_w+2, tile_h+2, 0x6A4FBF);
+
+        // The symbol itself
+        draw_icon_symbol(icon_idx, cx, cy, sel ? 0xFFFFFF : glyph);
+
+        // Label: drawn directly in pixels, sized to exactly fit the
+        // text (no fixed-width background bleed past the tile edge,
+        // which was the source of the stray color bar under icons).
+        int label_len = str_len(label);
+        int label_w   = label_len * 8;
+        int label_x   = cx - label_w/2;
+        int label_y   = py + tile_h + 8;
+        uint32_t lbl_fg = sel ? 0xFFFFFF : 0xD8C8F0;
+        uint32_t lbl_bg = sel ? 0x4A3870 : 0x0C0820;
+
+        if (sel) vesa_fill_rect(label_x-3, label_y-2, label_w+6, 16, lbl_bg);
+        vesa_draw_string(label_x, label_y, label, lbl_fg, sel ? lbl_bg : 0x0C0820);
+        return;
+    }
+
+    // ── VGA text fallback (no VESA): keep the original bracket
+    // tile look, using the nearest character-grid cell for this
+    // pixel position, since there's no pixel canvas to draw on.
+    int x = px/8, y = py/16;
+    uint8_t bg=sel?t->icon_sel_bg:t->desktop_bg;
+    uint8_t fg=sel?t->icon_sel_fg:7;
+    vga_puts(x,y,  "[======]",fg,bg);
+    vga_puts(x,y+1,"[  **  ]",fg,bg);
+    vga_puts(x,y+2,"[======]",fg,bg);
+    int lx=x+(8-str_len(label))/2;
+    vga_puts(lx,y+3,label,sel?t->icon_sel_fg:t->taskbar_fg,t->desktop_bg);
+}
+
+static void draw_icons(){
+    int W = vesa.active ? (int)vesa.width  : VGA_WIDTH*8;
+    int H = vesa.active ? (int)vesa.height : VGA_HEIGHT*16;
+
+    int cols = 5, rows = 3;
+    int tile_w = 64, tile_h = 64;
+    int label_h = 24;          // space below tile for the label
+    int cell_w = W * 7 / 10 / cols;   // icons span ~70% of screen width
+    if (cell_w < tile_w + 24) cell_w = tile_w + 24;
+    int cell_h = tile_h + label_h + 16;
+
+    int grid_w = cell_w * cols;
+    int grid_h = cell_h * rows;
+    int start_x = (W - grid_w) / 2;
+    int start_y = 96; // below the taskbar, matches taskbar height + margin
+    if (start_y + grid_h > H - 60) start_y = H - 60 - grid_h;
+
+    for (int i = 0; i < DESKTOP_APP_COUNT; i++) {
+        int col = i % cols, row = i / cols;
+        int px = start_x + col*cell_w + (cell_w - tile_w)/2;
+        int py = start_y + row*cell_h;
+        draw_icon_px(px, py, i, app_names[i], selected_icon==i);
+    }
+}
+
+// ─── App windows ─────────────────────────────────────────────────
+static void draw_terminal_window(){
+    const Theme*t=TH;
+
+    // First time this window opens, hook up the redirect buffer so
+    // shell.c's terminal_print() calls land here instead of raw VGA
+    // memory, and print the welcome banner once.
+    if (!term_initialized) {
+        terminal_redirect_clear(&term_buf);
+        terminal_set_redirect(&term_buf);
+        terminal_set_color(COLOR_LIGHT_CYAN, COLOR_BLACK);
+        terminal_print("Nyx OS Shell v2.0\n");
+        terminal_print("Type 'help' for commands. TAB=autocomplete  UP/DOWN=history\n");
+        terminal_print("\n");
+        term_initialized = 1;
+    }
+    terminal_set_redirect(&term_buf);
+
+    if (!vesa.active) {
+        // ── VGA text fallback: simple static-ish rendering of the
+        // last 17 buffered lines plus the live input line.
+        vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+        vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+        vga_puts(3,2,"[ Terminal - Nyx Shell v2.0 ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+
+        int visible_rows = 17;
+        int total = term_buf.line_count;
+        int first = total - visible_rows; if (first < 0) first = 0;
+        int row = 4;
+        for (int i = first; i < total && row < 21; i++) {
+            vga_puts(3, row, term_buf.lines[i % TERM_REDIRECT_ROWS], t->win_fg, t->win_bg);
+            row++;
+        }
+        vga_puts(3, 21, "nyx>", t->accent, t->win_bg);
+        vga_puts(8, 21, cmd_buffer, t->win_fg, t->win_bg);
+        return;
+    }
+
+    // ── VESA pixel rendering ──────────────────────────────────────
+    int W = (int)vesa.width, H = (int)vesa.height;
+    int win_x = W/10, win_y = 70;
+    int win_w = W*8/10, win_h = H - 160;
+
+    // Window shadow + body
+    vesa_fill_rect(win_x+5, win_y+5, win_w, win_h, 0x05030C);
+    vesa_fill_rect(win_x, win_y, win_w, win_h, 0x0E0824);
+    vesa_draw_rect(win_x, win_y, win_w, win_h, 0x6A4FBF);
+    vesa_draw_rect(win_x-1, win_y-1, win_w+2, win_h+2, 0x3D2A66);
+
+    // Title bar
+    int title_h = 32;
+    vesa_fill_rect(win_x+1, win_y+1, win_w-2, title_h, 0x1E1240);
+    vesa_hline(win_x+1, win_y+title_h, win_w-2, 0xB088FF);
+    vesa_draw_string(win_x+16, win_y+9, "Terminal - Nyx Shell v2.0", 0xE8D8FF, 0);
+    vesa_draw_string(win_x+win_w-32, win_y+9, "[X]", 0xFF6B6B, 0);
+
+    // Output area: render the last N lines that fit, monospace 8x16
+    int line_h   = 16;
+    int pad      = 16;
+    int text_x   = win_x + pad;
+    int text_top = win_y + title_h + 10;
+    int input_h  = 28;
+    int avail_h  = win_h - title_h - 10 - input_h - 16;
+    int visible_rows = avail_h / line_h;
+    if (visible_rows < 1) visible_rows = 1;
+
+    int total = term_buf.line_count;
+    int first = total - visible_rows - term_scroll;
+    if (first < 0) first = 0;
+
+    int y = text_top;
+    for (int i = first; i < total && i < first + visible_rows; i++) {
+        const char* ln = term_buf.lines[i % TERM_REDIRECT_ROWS];
+        uint32_t fg = 0xC8B8E8;
+        // Lightly highlight the prompt lines for readability.
+        if (ln[0]=='n' && ln[1]=='y' && ln[2]=='x' && ln[3]=='>') fg = 0xB088FF;
+        vesa_draw_string(text_x, y, ln, fg, 0);
+        y += line_h;
+    }
+
+    // Input line, pinned to the bottom of the window
+    int input_y = win_y + win_h - input_h - 8;
+    vesa_hline(win_x+pad, input_y-6, win_w-pad*2, 0x3D2A66);
+    vesa_draw_string(text_x, input_y, "nyx>", 0xB088FF, 0);
+    vesa_draw_string(text_x+40, input_y, cmd_buffer, 0xF0E8FF, 0);
+
+    // Blinking-style cursor (always drawn; real blinking would need
+    // a frame timer we don't have wired to redraw on its own yet)
+    int cur_x = text_x + 40 + str_len(cmd_buffer)*8;
+    vesa_fill_rect(cur_x, input_y-1, 2, 14, 0xB088FF);
+}
+
+static void draw_files_window(){
+    const Theme*t=TH;
+
+    if (!vesa.active) {
+        // ── VGA text fallback ──
+        vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+        vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+        vga_puts(3,2,"[ File Manager ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+        vga_puts(3,4,"Location: /",t->highlight,t->win_bg);
+        vga_puts(3,5,"-----------------------------------------",t->win_border,t->win_bg);
+        vga_puts(3,6,"[SYS]  boot/",   t->accent,t->win_bg);
+        vga_puts(3,7,"[SYS]  kernel/", t->accent,t->win_bg);
+        vga_puts(3,8,"[SYS]  cpu/",    t->accent,t->win_bg);
+        vga_puts(3,9,"[SYS]  include/",t->accent,t->win_bg);
+        vga_puts(3,10,"-----------------------------------------",t->win_border,t->win_bg);
+        if(file_count==0){
+            vga_puts(3,11,"No user files yet.",t->win_border,t->win_bg);
+            vga_puts(3,12,"Use mkfile in Terminal to create files.",t->win_fg,t->win_bg);
+        } else {
+            int row=11,idx=0;
+            for(int i=0;i<MAX_FILES&&row<20;i++){
+                if(filesystem[i].used){
+                    uint8_t fg=(idx==selected_file)?t->win_bg:t->accent;
+                    uint8_t bg=(idx==selected_file)?t->accent:t->win_bg;
+                    vga_puts(3,row,"[FILE] ",fg,bg);
+                    vga_puts(10,row,filesystem[i].name,fg,bg);
+                    row++;idx++;
+                }
+            }
+            vga_puts(3,21,"ENTER:open  UP/DOWN:select  X:delete",t->win_border,t->win_bg);
+        }
+        return;
+    }
+
+    // ── VESA pixel rendering ──────────────────────────────────────
+    int W=(int)vesa.width, H=(int)vesa.height;
+    int win_x=W/10, win_y=70, win_w=W*8/10, win_h=H-160;
+
+    vesa_fill_rect(win_x+5, win_y+5, win_w, win_h, 0x05030C);
+    icon_rrect_grad(win_x, win_y, win_w, win_h, 0x140C30, 0x0E0824);
+    icon_rrect_border(win_x, win_y, win_w, win_h, 0x6A4FBF);
+
+    int title_h=36;
+    icon_rrect_grad(win_x+1, win_y+1, win_w-2, title_h, 0x2E2050, 0x1E1240);
+    vesa_hline(win_x+1, win_y+title_h, win_w-2, 0xB088FF);
+    vesa_draw_string(win_x+18, win_y+10, "File Manager", 0xE8D8FF, 0);
+    vesa_draw_string(win_x+win_w-32, win_y+10, "[X]", 0xFF6B6B, 0);
+
+    int px=win_x+22, py=win_y+title_h+14;
+    vesa_draw_string(px, py, "/ root", 0x9580C0, 0);
+    py += 26;
+    vesa_hline(win_x+16, py, win_w-32, 0x3D2A66);
+    py += 14;
+
+    // System folders (fixed, non-interactive)
+    const char* sysdirs[] = {"boot","kernel","cpu","include"};
+    for (int i=0;i<4;i++) {
+        vesa_draw_char(px+2, py, '>', 0xFFD166, 0);
+        vesa_draw_string(px+18, py, sysdirs[i], 0xD8C8F0, 0);
+        vesa_draw_string(px+18+str_len(sysdirs[i])*8+4, py, "/", 0xD8C8F0, 0);
+        vesa_draw_string(win_x+win_w-100, py, "system", 0x554477, 0);
+        py += 24;
+    }
+    py += 6;
+    vesa_hline(win_x+16, py, win_w-32, 0x3D2A66);
+    py += 16;
+
+    if (file_count==0) {
+        vesa_draw_string(px, py, "No user files yet.", 0x6A5890, 0);
+        vesa_draw_string(px, py+20, "Use mkfile in Terminal to create files.", 0x554477, 0);
+    } else {
+        int idx=0;
+        for (int i=0;i<MAX_FILES;i++) {
+            if (!filesystem[i].used) continue;
+            int sel = (idx==selected_file);
+            int row_y = py;
+            int row_h = 26;
+            if (sel) {
+                icon_rrect_grad(px-6, row_y-3, win_w-2*22, row_h, 0x2E2050, 0x241A40);
+                icon_rrect_border(px-6, row_y-3, win_w-2*22, row_h, 0xB088FF);
+            }
+            vesa_draw_char(px+2, row_y+2, 'F', sel?0xFFFFFF:0x8FE0FF, 0);
+            vesa_draw_string(px+20, row_y+2, filesystem[i].name, sel?0xFFFFFF:0xD8C8F0, 0);
+            idx++; py += row_h + 4;
+        }
+
+        int hint_y = win_y+win_h-26;
+        vesa_hline(win_x+16, hint_y-8, win_w-32, 0x1E1240);
+        vesa_draw_string(px, hint_y, "ENTER open   UP/DOWN select   X delete   ESC back", 0x3D2A66, 0);
+    }
+}
+
+static void draw_file_viewer(int file_idx){
+    const Theme*t=TH;
+
+    if (!vesa.active) {
+        // ── VGA text fallback ──
+        vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+        vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+        vga_puts(3,2,"[ File Viewer - ",t->win_title_fg,t->win_title_bg);
+        vga_puts(19,2,filesystem[file_idx].name,t->accent,t->win_title_bg);
+        vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+        vga_puts(3,4,"-----------------------------------------",t->win_border,t->win_bg);
+        const char*content=filesystem[file_idx].content;
+        int x=3,y=5;
+        for(int i=0;content[i]&&y<21;i++){
+            if(content[i]=='\n'||x>=76){x=3;y++;if(content[i]=='\n')continue;}
+            vga_put(x++,y,content[i],t->win_fg,t->win_bg);
+        }
+        vga_puts(3,22,"ESC: back to files",t->win_border,t->win_bg);
+        return;
+    }
+
+    // ── VESA pixel rendering ──────────────────────────────────────
+    int W=(int)vesa.width, H=(int)vesa.height;
+    int win_x=W/10, win_y=70, win_w=W*8/10, win_h=H-160;
+
+    vesa_fill_rect(win_x+5, win_y+5, win_w, win_h, 0x05030C);
+    icon_rrect_grad(win_x, win_y, win_w, win_h, 0x140C30, 0x0E0824);
+    icon_rrect_border(win_x, win_y, win_w, win_h, 0x6A4FBF);
+
+    int title_h=36;
+    icon_rrect_grad(win_x+1, win_y+1, win_w-2, title_h, 0x2E2050, 0x1E1240);
+    vesa_hline(win_x+1, win_y+title_h, win_w-2, 0xB088FF);
+    vesa_draw_string(win_x+18, win_y+10, filesystem[file_idx].name, 0x8FE0FF, 0);
+    vesa_draw_string(win_x+win_w-32, win_y+10, "[X]", 0xFF6B6B, 0);
+
+    // Content area — word-wrapped at the window's pixel width
+    const char* content = filesystem[file_idx].content;
+    int text_x = win_x+22, text_y = win_y+title_h+18;
+    int max_x  = win_x+win_w-22;
+    int cx = text_x;
+    for (int i=0; content[i] && text_y < win_y+win_h-30; i++) {
+        if (content[i]=='\n') { cx=text_x; text_y+=18; continue; }
+        if (cx+8 > max_x) { cx=text_x; text_y+=18; }
+        vesa_draw_char(cx, text_y, content[i], 0xC8B8E8, 0);
+        cx += 8;
+    }
+
+    int hint_y = win_y+win_h-26;
+    vesa_hline(win_x+16, hint_y-8, win_w-32, 0x1E1240);
+    vesa_draw_string(win_x+22, hint_y, "ESC: back to file list", 0x3D2A66, 0);
+}
+
+// Compact lunar eclipse logo for the About window — same motif as
+// the splash screen, sized down to fit alongside system info
+// instead of filling the whole display.
+static void draw_about_logo(int cx,int cy,int R){
+    icon_ring(cx,cy,R+6,2,0x1A1230);
+    icon_circ(cx,cy,R,0x020108);
+    int band_out=R, band_in=R-3;
+    for(int dy=-band_out;dy<=band_out;dy++){
+        for(int dx=-band_out;dx<=band_out;dx++){
+            int d2=dx*dx+dy*dy;
+            if(d2>band_out*band_out||d2<band_in*band_in)continue;
+            int ady=(dy<0)?-dy:dy;
+            if(dx+R*3/10<ady)continue;
+            if(dx<-R/6)continue;
+            int taper=dx-ady;
+            uint32_t col=(taper>R/3)?0xB088FF:(taper>0)?0x6A4FBF:0x4A3680;
+            vesa_put_pixel(cx+dx,cy+dy,col);
+        }
+    }
+}
+
+static void draw_about_window(){
+    const Theme*t=TH;
+
+    if (!vesa.active) {
+        vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+        vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+        vga_puts(3,2,"[ About Nyx OS ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+        vga_puts(10,5, "      _   _ __   ___  __   ___  ___ ",t->highlight,t->win_bg);
+        vga_puts(10,6, "     | | | |\\ \\ / / |/ _\\ / _ \\/ __|",t->highlight,t->win_bg);
+        vga_puts(10,7, "     | |_| | \\ V /| |\\__ \\ (_) \\__ \\",t->highlight,t->win_bg);
+        vga_puts(10,8, "      \\___/   \\_/ |_||___/ \\___/|___/",t->highlight,t->win_bg);
+        vga_puts(10,10,"Version  : 3.0 (2026)",          t->win_fg,t->win_bg);
+        vga_puts(10,11,"Arch     : x86 32-bit Protected", t->win_fg,t->win_bg);
+        vga_puts(10,12,"Kernel   : Monolithic",           t->win_fg,t->win_bg);
+        vga_puts(10,13,"Graphics : VGA Text Mode",        t->win_fg,t->win_bg);
+        vga_puts(10,14,"Theme    : Nyx Purple",           t->win_fg,t->win_bg);
+        char up[16]; uint32_t secs=tick/18;
+        up[0]='0'+(secs/3600)%10; up[1]=':';
+        up[2]='0'+(secs/60/10)%6; up[3]='0'+(secs/60)%10; up[4]=':';
+        up[5]='0'+(secs/10)%6;    up[6]='0'+secs%10;       up[7]='\0';
+        vga_puts(10,15,"Uptime   : ",t->win_fg,t->win_bg);
+        vga_puts(21,15,up,t->accent,t->win_bg);
+        vga_puts(10,18,"Built by G'olibjon Ko'charboyev",t->accent,t->win_bg);
+        vga_puts(3,20,"ESC:back",t->win_border,t->win_bg);
+        return;
+    }
+
+    // ── VESA pixel rendering ──────────────────────────────────────
+    int W=(int)vesa.width, H=(int)vesa.height;
+    int win_x=W/10, win_y=70, win_w=W*8/10, win_h=H-160;
+
+    vesa_fill_rect(win_x+5,win_y+5,win_w,win_h,0x05030C);
+    icon_rrect_grad(win_x,win_y,win_w,win_h,0x140C30,0x0E0824);
+    icon_rrect_border(win_x,win_y,win_w,win_h,0x6A4FBF);
+
+    int title_h=36;
+    icon_rrect_grad(win_x+1,win_y+1,win_w-2,title_h,0x2E2050,0x1E1240);
+    vesa_hline(win_x+1,win_y+title_h,win_w-2,0xB088FF);
+    vesa_draw_string(win_x+18,win_y+10,"About Nyx OS",0xE8D8FF,0x271848);
+    vesa_draw_string(win_x+win_w-32,win_y+10,"[X]",0xFF6B6B,0x271848);
+
+    // ── Logo column (left) ────────────────────────────────────────
+    int col_w = 160;
+    int logo_cx = win_x + col_w/2 + 10;
+    int logo_cy = win_y + title_h + 70;
+    draw_about_logo(logo_cx, logo_cy, 44);
+
+    const char* word="NYX OS";
+    int wlen=str_len(word)*8;
+    vesa_draw_string(logo_cx-wlen/2, logo_cy+58, word, 0xE8D8FF, 0x0E0824);
+    const char* ver="v3.0  -  2026";
+    int vlen=str_len(ver)*8;
+    vesa_draw_string(logo_cx-vlen/2, logo_cy+76, ver, 0x6A5890, 0x0E0824);
+
+    int div_x = win_x + col_w;
+    vesa_vline(div_x, win_y+title_h+14, win_h-title_h-60, 0x1E1240);
+
+    // ── Info column (right) ───────────────────────────────────────
+    int ix = div_x + 24;
+    int iw = win_x+win_w-24 - ix;
+    int iy = win_y+title_h+20;
+    int row_h = 26;
+
+    if (about_tab == 0) {
+        const char* keys[] = {"Architecture","Kernel","Graphics","Theme","Uptime","User"};
+        char vals[6][40];
+        { const char*v="x86 32-bit Protected Mode"; int i=0;while(v[i]){vals[0][i]=v[i];i++;}vals[0][i]='\0'; }
+        { const char*v="Monolithic"; int i=0;while(v[i]){vals[1][i]=v[i];i++;}vals[1][i]='\0'; }
+        {
+            char buf[40]; int p=0;
+            const char*pre="VESA "; int i=0; while(pre[i])buf[p++]=pre[i++];
+            int w=(int)vesa.width,h=(int)vesa.height;
+            char nb[6]; int nl=0; int n=w; if(n==0){nb[nl++]='0';} else {char tmp[6];int tl=0;while(n>0){tmp[tl++]='0'+n%10;n/=10;}while(tl>0)nb[nl++]=tmp[--tl];}
+            for(int k=0;k<nl;k++)buf[p++]=nb[k];
+            buf[p++]='x';
+            n=h; nl=0; if(n==0){nb[nl++]='0';} else {char tmp[6];int tl=0;while(n>0){tmp[tl++]='0'+n%10;n/=10;}while(tl>0)nb[nl++]=tmp[--tl];}
+            for(int k=0;k<nl;k++)buf[p++]=nb[k];
+            const char*suf=" 32bpp"; i=0; while(suf[i])buf[p++]=suf[i++];
+            buf[p]='\0';
+            for(int k=0;k<=p;k++) vals[2][k]=buf[k];
+        }
+        { const char*v="Nyx Purple"; int i=0;while(v[i]){vals[3][i]=v[i];i++;}vals[3][i]='\0'; }
+        {
+            uint32_t secs=tick/18;
+            vals[4][0]='0'+(secs/3600)%10; vals[4][1]=':';
+            vals[4][2]='0'+(secs/60/10)%6; vals[4][3]='0'+(secs/60)%10; vals[4][4]=':';
+            vals[4][5]='0'+(secs/10)%6;    vals[4][6]='0'+secs%10;      vals[4][7]='\0';
+        }
+        if (logged_in_user>=0) {
+            int i=0; while(users[logged_in_user].username[i]&&i<39){vals[5][i]=users[logged_in_user].username[i];i++;}
+            vals[5][i]='\0';
+        } else { vals[5][0]='-'; vals[5][1]='\0'; }
+
+        for (int i=0;i<6;i++) {
+            vesa_draw_string(ix, iy, keys[i], 0x6A5890, 0x0E0824);
+            int vlen2=str_len(vals[i])*8;
+            vesa_draw_string(ix+iw-vlen2, iy, vals[i], (i==2||i==3)?0xB088FF:0xD8C8F0, 0x0E0824);
+            iy += row_h;
+            if (i<5) vesa_hline(ix, iy-8, iw, 0x1A1230);
+        }
+    } else {
+        const char* lines[] = {
+            "Nyx OS",
+            "A custom x86 operating system",
+            "built from scratch \xE2\x80\x94 bootloader,",
+            "kernel, VESA graphics, and a full",
+            "desktop environment.",
+            "",
+            "Created by:",
+            "G'olibjon Ko'charboyev",
+        };
+        for (int i=0;i<8;i++) {
+            uint32_t col = (i==0||i==6) ? 0xB088FF : 0xD8C8F0;
+            vesa_draw_string(ix, iy, lines[i], col, 0x0E0824);
+            iy += 22;
+        }
+    }
+
+    // Tab switcher
+    int tab_y = win_y+win_h-58;
+    const char* tabs[]={"System Info","Credits"};
+    int tx = ix;
+    for (int i=0;i<2;i++) {
+        int sel=(about_tab==i);
+        int tw=str_len(tabs[i])*8+24;
+        if (sel) {
+            icon_rrect_grad(tx,tab_y,tw,24,0x2E2050,0x241A40);
+            icon_rrect_border(tx,tab_y,tw,24,0xB088FF);
+        } else {
+            icon_rrect_border(tx,tab_y,tw,24,0x3D2A66);
+        }
+        vesa_draw_string(tx+12,tab_y+5,tabs[i],sel?0xFFFFFF:0x9580C0,sel?0x2E2050:0x140C30);
+        tx += tw+10;
+    }
+
+    int hint_y = win_y+win_h-22;
+    vesa_hline(win_x+16,hint_y-8,win_w-32,0x1E1240);
+    vesa_draw_string(win_x+22,hint_y,"Built by G'olibjon Ko'charboyev",0x3D2A66,0x0E0824);
+    const char* hint2="LEFT/RIGHT switch tab   ESC back";
+    int h2len=str_len(hint2)*8;
+    vesa_draw_string(win_x+win_w-22-h2len,hint_y,hint2,0x3D2A66,0x0E0824);
+}
+
+static void draw_trash_window(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Trash Bin ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+    vga_puts(3,4,"-----------------------------------------",t->win_border,t->win_bg);
+    if(trash_count==0){
+        vga_puts(3,6,"Trash is empty.",t->win_border,t->win_bg);
+    } else {
+        int row=5;
+        for(int i=0;i<MAX_TRASH&&row<20;i++){
+            if(trash[i].used){
+                vga_puts(3,row,"[DEL]  ",t->danger,t->win_bg);
+                vga_puts(10,row,trash[i].name,t->win_fg,t->win_bg);
+                row++;
+            }
+        }
+        vga_puts(3,21,"R:restore   X:empty trash",t->win_border,t->win_bg);
+    }
+}
+
+static void draw_music_window(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Music Player ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+    vga_puts(3,4,"-----------------------------------------",t->win_border,t->win_bg);
+    const Song*s=&playlist[music_current_song()];
+    vga_puts(3,6,"Now Playing:",t->highlight,t->win_bg);
+    vga_puts(3,7,s->title, t->accent,t->win_bg);
+    vga_puts(3,8,s->artist,t->win_fg,t->win_bg);
+    vga_puts(3,10,"Status:",t->highlight,t->win_bg);
+    if(music_is_playing())vga_puts(12,10,">> PLAYING",t->success,t->win_bg);
+    else                  vga_puts(12,10,"|| PAUSED ",t->warning,t->win_bg);
+    vga_puts(3,12,"-----------------------------------------",t->win_border,t->win_bg);
+    vga_puts(3,14,"Playlist:",t->highlight,t->win_bg);
+    for(int i=0;i<playlist_count;i++){
+        uint8_t fg=(i==music_current_song())?t->win_bg:t->win_fg;
+        uint8_t bg=(i==music_current_song())?t->success:t->win_bg;
+        vga_puts(3,15+i,(i==music_current_song())?">":" ",fg,bg);
+        vga_puts(5,15+i,playlist[i].title,fg,bg);
+    }
+    vga_puts(3,23,"P:play/pause  N:next  B:prev  S:stop  ESC:back",t->win_border,t->win_bg);
+}
+
+// ─── Settings ─────────────────────────────────────────────────────
+static void draw_settings_menu(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+    vga_puts(3,4,"-----------------------------------------",t->win_border,t->win_bg);
+    vga_puts(3,5,"Select a category:",t->win_fg,t->win_bg);
+    const char*items[]={
+        "  [*]  Date & Time","  [*]  Display","  [*]  Sound",
+        "  [*]  Network","  [*]  System Info","  [*]  Users",
+        "  [*]  Wallpaper","  [*]  Theme",
+    };
+    for(int i=0;i<8;i++){
+        uint8_t fg=(i==settings_selected)?t->win_bg:t->win_fg;
+        uint8_t bg=(i==settings_selected)?t->highlight:t->win_bg;
+        vga_puts(3,8+i*2,items[i],fg,bg);
+    }
+    vga_puts(3,24,"UP/DOWN:navigate  ENTER:open  ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_datetime(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Date & Time ]",t->win_title_fg,t->win_title_bg);
+    char ts[9];char ds[9];rtc_get_time_str(ts);rtc_get_date_str(ds);
+    vga_puts(3,4,"Current Time :",t->highlight,t->win_bg);vga_puts(18,4,ts,t->accent,t->win_bg);
+    vga_puts(3,5,"Current Date :",t->highlight,t->win_bg);vga_puts(18,5,ds,t->accent,t->win_bg);
+    vga_puts(3,6,"Timezone     :",t->highlight,t->win_bg);
+    vga_puts(18,6,timezones[current_timezone].name,t->success,t->win_bg);
+    vga_puts(26,6,timezones[current_timezone].city,t->win_fg,t->win_bg);
+    vga_puts(3,8,"Select Timezone:",t->win_fg,t->win_bg);
+    int start=settings_scroll;
+    int end=start+9;if(end>timezone_count)end=timezone_count;
+    for(int i=start;i<end;i++){
+        int row=10+(i-start);
+        uint8_t fg=(i==settings_selected)?t->win_bg:t->win_fg;
+        uint8_t bg=(i==settings_selected)?t->highlight:t->win_bg;
+        if(i==current_timezone&&bg==t->win_bg)fg=t->success;
+        vga_puts(3,row,timezones[i].name,fg,bg);
+        vga_puts(12,row,timezones[i].city,fg,bg);
+        if(i==current_timezone)vga_puts(72,row,"[*]",t->success,bg);
+    }
+    if(settings_scroll>0) vga_puts(38,9,"[^]",t->accent,t->win_bg);
+    if(end<timezone_count)vga_puts(38,19,"[v]",t->accent,t->win_bg);
+    vga_puts(3,20,"ENTER:apply  UP/DOWN:scroll  ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_display(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Display ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,6,"Display Mode  : VGA Text 80x25",  t->win_fg,t->win_bg);
+    vga_puts(3,7,"Colors        : 16 color palette",t->win_fg,t->win_bg);
+    vga_puts(3,8,"Resolution    : 720x400 (text)",  t->win_fg,t->win_bg);
+    vga_puts(3,9,"Font          : 8x16 VGA ROM",    t->win_fg,t->win_bg);
+    vga_puts(3,11,"Color Palette Preview:",t->highlight,t->win_bg);
+    for(int i=0;i<16;i++){vga_put(3+i*2,13,' ',0,i);vga_put(4+i*2,13,' ',0,i);}
+    vga_puts(3,20,"ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_sound(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Sound ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,6,"System Volume:",t->highlight,t->win_bg);
+    vga_puts(3,8,"[-]  ",t->win_fg,t->win_bg);
+    int bar_len=sound_volume/5;
+    for(int i=0;i<20;i++){vga_put(8+i,8,' ',0,(i<bar_len)?t->success:t->win_border);}
+    vga_puts(29,8,"  [+]",t->win_fg,t->win_bg);
+    char vol[4];vol[0]='0'+(sound_volume/100);vol[1]='0'+(sound_volume/10%10);vol[2]='0'+(sound_volume%10);vol[3]='\0';
+    vga_puts(36,8,vol,t->accent,t->win_bg);vga_puts(40,8,"%",t->accent,t->win_bg);
+    vga_puts(3,11,"PC Speaker audio active!",t->success,t->win_bg);
+    vga_puts(3,20,"LEFT/RIGHT:volume  ENTER:test  ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_network(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Network ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,6,"Status      : No network adapter",t->danger,t->win_bg);
+    vga_puts(3,7,"IP Address  : 0.0.0.0",t->win_border,t->win_bg);
+    vga_puts(3,11,"Coming in Nyx OS v0.2!",t->accent,t->win_bg);
+    vga_puts(3,20,"ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_system(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > System Info ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,6,"OS Name      : Nyx OS",             t->win_fg,t->win_bg);
+    vga_puts(3,7,"Version      : 0.1",                t->win_fg,t->win_bg);
+    vga_puts(3,8,"Architecture : x86 32-bit",         t->win_fg,t->win_bg);
+    vga_puts(3,9,"Kernel       : Monolithic",         t->win_fg,t->win_bg);
+    vga_puts(3,10,"Boot         : GRUB Multiboot",    t->win_fg,t->win_bg);
+    vga_puts(3,14,"Built from scratch in C & Assembly",t->accent,t->win_bg);
+    vga_puts(3,20,"ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_users_window(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(74,2,"[X]",t->danger,t->win_title_bg);
+    if(users_sub==0){
+        vga_puts(3,2,"[ Settings > Users ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(3,5,"Manage Users:",t->highlight,t->win_bg);
+        int row=6;
+        for(int i=0;i<MAX_USERS;i++){
+            if(users[i].active){
+                uint8_t fg=(i==users_selected)?t->win_bg:t->win_fg;
+                uint8_t bg=(i==users_selected)?t->highlight:t->win_bg;
+                vga_puts(3,row,"[USER] ",t->success,bg);
+                vga_puts(10,row,users[i].username,fg,bg);
+                if(i==logged_in_user)vga_puts(28,row,"(you)",t->success,bg);
+                if(i==0)vga_puts(35,row,"[admin]",t->danger,bg);
+                row++;
+            }
+        }
+        vga_puts(3,15,"A:add  C:change password  D:delete",t->win_fg,t->win_bg);
+        if(u_msg[0])vga_puts(3,19,u_msg,t->success,t->win_bg);
+        vga_puts(3,20,"UP/DOWN:select  ESC:back",t->win_border,t->win_bg);
+    } else if(users_sub==1){
+        vga_puts(3,2,"[ Settings > Users > Add User ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(3,6,"New Username:",t->highlight,t->win_bg);
+        vga_fill_rect(3,7,30,1,' ',u_field==0?t->win_bg:t->win_fg,u_field==0?t->highlight:t->win_border);
+        vga_puts(3,7,u_new_name,u_field==0?t->win_bg:t->win_fg,u_field==0?t->highlight:t->win_border);
+        vga_puts(3,9,"New Password:",t->highlight,t->win_bg);
+        vga_fill_rect(3,10,30,1,' ',u_field==1?t->win_bg:t->win_fg,u_field==1?t->highlight:t->win_border);
+        char stars[17];for(int i=0;i<u_pass_pos;i++)stars[i]='*';stars[u_pass_pos]='\0';
+        vga_puts(3,10,stars,u_field==1?t->win_bg:t->win_fg,u_field==1?t->highlight:t->win_border);
+        if(u_msg[0])vga_puts(3,13,u_msg,t->danger,t->win_bg);
+        vga_puts(3,20,"TAB:next  ENTER:create  ESC:back",t->win_border,t->win_bg);
+    } else if(users_sub==2){
+        vga_puts(3,2,"[ Settings > Users > Change Password ]",t->win_title_fg,t->win_title_bg);
+        vga_puts(3,5,"User:",t->highlight,t->win_bg);vga_puts(9,5,users[users_selected].username,t->accent,t->win_bg);
+        vga_puts(3,7,"Old Password:",t->highlight,t->win_bg);
+        vga_fill_rect(3,8,30,1,' ',u_field==0?t->win_bg:t->win_fg,u_field==0?t->highlight:t->win_border);
+        char old_s[17];for(int i=0;i<u_old_pos;i++)old_s[i]='*';old_s[u_old_pos]='\0';
+        vga_puts(3,8,old_s,u_field==0?t->win_bg:t->win_fg,u_field==0?t->highlight:t->win_border);
+        vga_puts(3,10,"New Password:",t->highlight,t->win_bg);
+        vga_fill_rect(3,11,30,1,' ',u_field==1?t->win_bg:t->win_fg,u_field==1?t->highlight:t->win_border);
+        char new_s[17];for(int i=0;i<u_pass_pos;i++)new_s[i]='*';new_s[u_pass_pos]='\0';
+        vga_puts(3,11,new_s,u_field==1?t->win_bg:t->win_fg,u_field==1?t->highlight:t->win_border);
+        vga_puts(3,13,"Confirm:",t->highlight,t->win_bg);
+        vga_fill_rect(3,14,30,1,' ',u_field==2?t->win_bg:t->win_fg,u_field==2?t->highlight:t->win_border);
+        char cs[17];for(int i=0;i<u_confirm_pos;i++)cs[i]='*';cs[u_confirm_pos]='\0';
+        vga_puts(3,14,cs,u_field==2?t->win_bg:t->win_fg,u_field==2?t->highlight:t->win_border);
+        if(u_msg[0])vga_puts(3,17,u_msg,t->danger,t->win_bg);
+        vga_puts(3,20,"TAB:next  ENTER:save  ESC:back",t->win_border,t->win_bg);
+    }
+}
+
+static void draw_settings_wallpaper(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Wallpaper ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,4,"Select a wallpaper:",t->highlight,t->win_bg);
+    for(int i=0;i<WALLPAPER_COUNT;i++){
+        uint8_t fg=(i==settings_selected)?t->win_bg:t->win_fg;
+        uint8_t bg=(i==settings_selected)?t->highlight:t->win_bg;
+        vga_fill_rect(3,6+i*2,50,1,' ',fg,bg);
+        vga_puts(4,6+i*2,wallpapers[i].name,fg,bg);
+        if(i==current_wallpaper)vga_puts(20,6+i*2,"[ACTIVE]",t->success,bg);
+    }
+    vga_puts(3,20,"ENTER:apply  UP/DOWN:select  ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_theme(){
+    const Theme*t=TH;
+    vga_fill_rect(2,2,76,20,' ',t->win_fg,t->win_bg);
+    vga_fill_row(2,' ',t->win_title_fg,t->win_title_bg);
+    vga_puts(3,2,"[ Settings > Theme ]",t->win_title_fg,t->win_title_bg);
+    vga_puts(3,4,"Select a color theme:",t->highlight,t->win_bg);
+    for(int i=0;i<THEME_COUNT;i++){
+        uint8_t fg=(i==settings_selected)?0:t->win_fg;
+        uint8_t bg=(i==settings_selected)?14:t->win_bg;
+        vga_fill_rect(3,6+i*2,72,1,' ',fg,bg);
+        vga_put(4,6+i*2,' ',0,themes[i].taskbar_bg);
+        vga_put(5,6+i*2,' ',0,themes[i].desktop_bg);
+        vga_put(6,6+i*2,' ',0,themes[i].highlight);
+        vga_put(7,6+i*2,' ',0,themes[i].accent);
+        vga_puts(9,6+i*2,themes[i].name,fg,bg);
+        vga_puts(20,6+i*2,themes[i].desc,fg,bg);
+        if(i==current_theme)vga_puts(60,6+i*2,"[ACTIVE]",t->success,bg);
+    }
+    vga_puts(3,22,"ENTER:apply  UP/DOWN:select  ESC:back",t->win_border,t->win_bg);
+}
+
+static void draw_settings_window(){
+    if     (settings_section==-1)draw_settings_menu();
+    else if(settings_section==0) draw_settings_datetime();
+    else if(settings_section==1) draw_settings_display();
+    else if(settings_section==2) draw_settings_sound();
+    else if(settings_section==3) draw_settings_network();
+    else if(settings_section==4) draw_settings_system();
+    else if(settings_section==5) draw_users_window();
+    else if(settings_section==6) draw_settings_wallpaper();
+    else if(settings_section==7) draw_settings_theme();
+}
+
+// ─── Full redraw ──────────────────────────────────────────────────
+void desktop_draw(){
+    // No vesa_clear() here: draw_wallpaper()/draw_wallpaper_fast()
+    // already repaints the entire framebuffer every call, so an
+    // extra clear before it just causes a black flash for no
+    // benefit. The one-time clear that wipes stale login-screen
+    // margin pixels lives in desktop_init() instead, since that
+    // only runs once on login.
+    //
+    // The full cosmic wallpaper (gradient + stars + mountains) is
+    // only drawn when actually looking at the desktop icon grid.
+    // Every app window (terminal, calc, files, etc.) covers nearly
+    // the whole screen anyway, so recomputing the full scene behind
+    // it on every keystroke was pure wasted work and the actual
+    // cause of input lag — not a RAM shortage.
+    if (current_mode == MODE_DESKTOP)
+        draw_wallpaper();
+    else
+        wallpaper_draw_fast();
+
+    if(current_mode==MODE_DESKTOP||current_mode==MODE_TERMINAL)
+        draw_taskbar();
+    draw_statusbar();
+    switch(current_mode){
+        case MODE_DESKTOP:
+            draw_icons();
+            if(search_active) draw_search_bar();
+            break;
+        case MODE_TERMINAL: draw_terminal_window(); break;
+        case MODE_FILES:
+            if (viewing_file >= 0) draw_file_viewer(viewing_file);
+            else draw_files_window();
+            break;
+        case MODE_ABOUT:    draw_about_window();    break;
+        case MODE_TRASH:    draw_trash_window();    break;
+        case MODE_SETTINGS: draw_settings_window(); break;
+        case MODE_MUSIC:    draw_music_window();    break;
+        case MODE_CALC:     calc_draw();            break;
+        case MODE_GAMES:    games_draw();           break;
+        case MODE_EDITOR:   editor_draw();          break;
+        case MODE_PAINT:    paint_draw();           break;
+        case MODE_SYSMON:   sysmon_draw();          break;
+        case MODE_CLOCK:    clock_draw();           break;
+        case MODE_CALENDAR: calendar_draw();        break;
+        case MODE_WEATHER:  weather_draw_full();    break;
+        case MODE_APPLIB:   applib_draw();          break;
+    }
+
+    vesa_present();
+}
+
+void desktop_update_clock(){
+    if(current_mode!=MODE_DESKTOP&&current_mode!=MODE_TERMINAL)return;
+    const Theme*t=TH;
+    char ts[9];char ds[9];
+    rtc_get_time_str(ts);rtc_get_date_str(ds);
+    vga_puts(52,0,ds,t->taskbar_fg,    t->taskbar_bg);
+    vga_put(60,0,' ',t->taskbar_fg,    t->taskbar_bg);
+    vga_puts(61,0,ts,t->taskbar_accent,t->taskbar_bg);
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────
+static void move_to_trash(int file_idx){
+    int slot=-1;
+    for(int i=0;i<MAX_TRASH;i++)if(!trash[i].used){slot=i;break;}
+    if(slot==-1)return;
+    for(int i=0;i<MAX_FILENAME;i++)trash[slot].name[i]   =filesystem[file_idx].name[i];
+    for(int i=0;i<MAX_FILESIZE;i++)trash[slot].content[i]=filesystem[file_idx].content[i];
+    trash[slot].used=1;trash_count++;
+    filesystem[file_idx].used=0;file_count--;
+    if(selected_file>0)selected_file--;
+}
+static void restore_from_trash(int trash_idx){
+    for(int i=0;i<MAX_FILES;i++){
+        if(!filesystem[i].used){
+            for(int j=0;j<MAX_FILENAME;j++)filesystem[i].name[j]   =trash[trash_idx].name[j];
+            for(int j=0;j<MAX_FILESIZE;j++)filesystem[i].content[j]=trash[trash_idx].content[j];
+            filesystem[i].used=1;file_count++;
+            trash[trash_idx].used=0;trash_count--;
+            return;
+        }
+    }
+}
+static void empty_trash(){
+    for(int i=0;i<MAX_TRASH;i++)trash[i].used=0;
+    trash_count=0;
+}
+static void u_clear_form(){
+    for(int i=0;i<17;i++){u_new_name[i]='\0';u_new_pass[i]='\0';u_old_pass[i]='\0';u_confirm[i]='\0';}
+    u_name_pos=u_pass_pos=u_old_pos=u_confirm_pos=0;
+    u_field=0;u_msg[0]='\0';
+}
+
+// ─── Key handler ─────────────────────────────────────────────────
+void desktop_handle_key(char c){
+    // Reset screensaver idle
+    screensaver_reset_idle();
+
+    // Power menu
+    if(power_menu_is_open()){
+        power_menu_handle_key(c);
+        if(!power_menu_is_open() && !power_session_pending())
+            desktop_draw();
+        return;
+    }
+
+    // App Library
+    if(current_mode==MODE_APPLIB){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        applib_handle_key(c);
+        if(applib_launch_request>=0){
+            int req=applib_launch_request;
+            applib_launch_request=-1;
+            do_launch(req);
+            desktop_draw();
+        }
+        return;
+    }
+
+    // Weather
+    if(current_mode==MODE_WEATHER){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        weather_handle_key(c);return;
+    }
+
+    // Calendar
+    if(current_mode==MODE_CALENDAR){
+        if(c==27&&calendar_is_main_view()){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        calendar_handle_key(c);return;
+    }
+
+    // Clock
+    if(current_mode==MODE_CLOCK){
+        if(c==27&&clock_is_main_view()){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        clock_handle_key(c);return;
+    }
+
+    // Sysmon
+    if(current_mode==MODE_SYSMON){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        sysmon_handle_key(c);return;
+    }
+
+    // Paint
+    if(current_mode==MODE_PAINT){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        paint_handle_key(c);return;
+    }
+
+    // Editor
+    if(current_mode==MODE_EDITOR){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        editor_handle_key(c);return;
+    }
+
+    // Games
+    if(current_mode==MODE_GAMES){
+        if(c==27){games_init();current_mode=MODE_DESKTOP;desktop_draw();return;}
+        games_handle_key(c);return;
+    }
+
+    // Music
+    if(current_mode==MODE_MUSIC){
+        if(c=='p'||c=='P'){if(music_is_playing())music_pause();else music_play(music_current_song());desktop_draw();return;}
+        if(c=='n'||c=='N'){music_next();speaker_beep_high();desktop_draw();return;}
+        if(c=='b'||c=='B'){music_prev();speaker_beep_high();desktop_draw();return;}
+        if(c=='s'||c=='S'){music_stop();desktop_draw();return;}
+        if(c==27){music_stop();current_mode=MODE_DESKTOP;desktop_draw();return;}
+        return;
+    }
+
+    // Calc
+    if(current_mode==MODE_CALC){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        calc_handle_key(c);calc_draw();return;
+    }
+
+    // Files
+    if(current_mode==MODE_FILES){
+        // ── Viewing a single file: only ESC (back to list) does
+        // anything here. This sub-screen previously had no state
+        // tracking at all, so it would flash open for one frame
+        // and immediately get overwritten by the next redraw.
+        if (viewing_file >= 0) {
+            if (c==27) { viewing_file=-1; desktop_draw(); }
+            return;
+        }
+
+        if(c=='A'&&selected_file>0){selected_file--;speaker_beep();desktop_draw();return;}
+        if(c=='B'&&selected_file<file_count-1){selected_file++;speaker_beep();desktop_draw();return;}
+        if(c==13&&file_count>0){
+            int idx=0;
+            for(int i=0;i<MAX_FILES;i++){if(filesystem[i].used){if(idx==selected_file){viewing_file=i;desktop_draw();return;}idx++;}}
+            return;
+        }
+        if((c=='x'||c=='X')&&file_count>0){
+            int idx=0;
+            for(int i=0;i<MAX_FILES;i++){if(filesystem[i].used){if(idx==selected_file){speaker_beep_low();move_to_trash(i);desktop_draw();return;}idx++;}}
+            return;
+        }
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        return;
+    }
+
+    // Trash
+    if(current_mode==MODE_TRASH){
+        if(c=='r'||c=='R'){for(int i=0;i<MAX_TRASH;i++){if(trash[i].used){speaker_beep_high();restore_from_trash(i);desktop_draw();return;}}return;}
+        if(c=='x'||c=='X'){speaker_beep_low();empty_trash();desktop_draw();return;}
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();return;}
+        return;
+    }
+
+    // About
+    if(current_mode==MODE_ABOUT){
+        if(c==27){current_mode=MODE_DESKTOP;desktop_draw();}return;
+    }
+
+    // Terminal — keyboard.c owns all the actual input handling
+    // (typing, backspace, ENTER, history, autocomplete) since it's
+    // the code that genuinely receives every keystroke first; it
+    // calls desktop_draw() itself after each change. This handler
+    // only needs to close the window on ESC.
+    if(current_mode==MODE_TERMINAL){
+        if(c==27){
+            current_mode=MODE_DESKTOP;
+            term_initialized=0; // reset so reopening shows a fresh banner
+            terminal_set_redirect((term_redirect_t*)0); // crash/exception
+            // messages in isr.c must reach visible raw VGA output,
+            // not vanish into this now-closed window's buffer.
+            desktop_draw();
+        }
+        return;
+    }
+
+    // Settings
+    if(current_mode==MODE_SETTINGS){
+        if(settings_section==5){
+            if(users_sub==0){
+                if(c=='A'&&users_selected>0){users_selected--;desktop_draw();return;}
+                if(c=='B'&&users_selected<user_count-1){users_selected++;desktop_draw();return;}
+                if(c=='a'){if(user_count<MAX_USERS){users_sub=1;u_clear_form();desktop_draw();}else{str_copy(u_msg,"Max users!",48);desktop_draw();}return;}
+                if(c=='c'||c=='C'){users_sub=2;u_clear_form();desktop_draw();return;}
+                if(c=='d'||c=='D'){
+                    if(users_selected==0)str_copy(u_msg,"Cannot delete admin!",48);
+                    else if(users_selected==logged_in_user)str_copy(u_msg,"Cannot delete yourself!",48);
+                    else{auth_delete_user(users_selected);if(users_selected>=user_count)users_selected=user_count-1;str_copy(u_msg,"Deleted!",48);}
+                    desktop_draw();return;
+                }
+                if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+                return;
+            }
+            if(users_sub==1){
+                if(c=='\t'){u_field=(u_field+1)%2;desktop_draw();return;}
+                if(c==27){users_sub=0;desktop_draw();return;}
+                if(c==13){
+                    if(u_name_pos==0){str_copy(u_msg,"Username required!",48);desktop_draw();return;}
+                    if(u_pass_pos==0){str_copy(u_msg,"Password required!",48);desktop_draw();return;}
+                    if(auth_add_user(u_new_name,u_new_pass)){str_copy(u_msg,"User created!",48);users_sub=0;}
+                    else str_copy(u_msg,"Failed!",48);
+                    desktop_draw();return;
+                }
+                if(c==8){if(u_field==0&&u_name_pos>0)u_new_name[--u_name_pos]='\0';if(u_field==1&&u_pass_pos>0)u_new_pass[--u_pass_pos]='\0';desktop_draw();return;}
+                if(c>=32&&c<127){
+                    if(u_field==0&&u_name_pos<16){u_new_name[u_name_pos++]=c;u_new_name[u_name_pos]='\0';}
+                    if(u_field==1&&u_pass_pos<16){u_new_pass[u_pass_pos++]=c;u_new_pass[u_pass_pos]='\0';}
+                    desktop_draw();return;
+                }
+                return;
+            }
+            if(users_sub==2){
+                if(c=='\t'){u_field=(u_field+1)%3;desktop_draw();return;}
+                if(c==27){users_sub=0;desktop_draw();return;}
+                if(c==13){
+                    if(!str_eq(u_new_pass,u_confirm)){str_copy(u_msg,"Passwords don't match!",48);desktop_draw();return;}
+                    if(auth_change_password(users_selected,u_old_pass,u_new_pass)){str_copy(u_msg,"Changed!",48);users_sub=0;speaker_beep_high();}
+                    else{str_copy(u_msg,"Wrong old password!",48);speaker_beep_low();}
+                    desktop_draw();return;
+                }
+                if(c==8){
+                    if(u_field==0&&u_old_pos>0)u_old_pass[--u_old_pos]='\0';
+                    if(u_field==1&&u_pass_pos>0)u_new_pass[--u_pass_pos]='\0';
+                    if(u_field==2&&u_confirm_pos>0)u_confirm[--u_confirm_pos]='\0';
+                    desktop_draw();return;
+                }
+                if(c>=32&&c<127){
+                    if(u_field==0&&u_old_pos<16){u_old_pass[u_old_pos++]=c;u_old_pass[u_old_pos]='\0';}
+                    if(u_field==1&&u_pass_pos<16){u_new_pass[u_pass_pos++]=c;u_new_pass[u_pass_pos]='\0';}
+                    if(u_field==2&&u_confirm_pos<16){u_confirm[u_confirm_pos++]=c;u_confirm[u_confirm_pos]='\0';}
+                    desktop_draw();return;
+                }
+                return;
+            }
+            return;
+        }
+        if(settings_section==6){
+            if(c=='A'&&settings_selected>0){settings_selected--;desktop_draw();return;}
+            if(c=='B'&&settings_selected<WALLPAPER_COUNT-1){settings_selected++;desktop_draw();return;}
+            if(c==13){current_wallpaper=settings_selected;speaker_beep_high();desktop_draw();return;}
+            if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+            return;
+        }
+        if(settings_section==7){
+            if(c=='A'&&settings_selected>0){settings_selected--;desktop_draw();return;}
+            if(c=='B'&&settings_selected<THEME_COUNT-1){settings_selected++;desktop_draw();return;}
+            if(c==13){current_theme=settings_selected;speaker_beep_high();desktop_draw();return;}
+            if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+            return;
+        }
+        if(settings_section==-1){
+            if(c=='A'&&settings_selected>0){settings_selected--;speaker_beep();desktop_draw();return;}
+            if(c=='B'&&settings_selected<7){settings_selected++;speaker_beep();desktop_draw();return;}
+            if(c==13){
+                settings_section=settings_selected;
+                settings_selected=current_timezone;
+                settings_scroll=current_timezone>9?current_timezone-9:0;
+                u_clear_form();users_sub=0;
+                speaker_beep_high();desktop_draw();return;
+            }
+            if(c==27){current_mode=MODE_DESKTOP;settings_section=-1;settings_selected=0;desktop_draw();return;}
+            return;
+        }
+        if(settings_section==0){
+            if(c=='A'&&settings_selected>0){settings_selected--;if(settings_selected<settings_scroll)settings_scroll--;desktop_draw();return;}
+            if(c=='B'&&settings_selected<timezone_count-1){settings_selected++;if(settings_selected>=settings_scroll+9)settings_scroll++;desktop_draw();return;}
+            if(c==13){current_timezone=settings_selected;speaker_beep_high();desktop_draw();return;}
+            if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+            return;
+        }
+        if(settings_section==2){
+            if(c=='D'&&sound_volume>0){sound_volume-=5;speaker_beep_low();desktop_draw();return;}
+            if(c=='C'&&sound_volume<100){sound_volume+=5;speaker_beep_high();desktop_draw();return;}
+            if(c==13){speaker_play(523);extern void delay(uint32_t);delay(150);speaker_play(659);delay(150);speaker_play(784);delay(150);speaker_stop();return;}
+            if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+            return;
+        }
+        if(c==27){settings_section=-1;settings_selected=0;desktop_draw();return;}
+        return;
+    }
+
+    // Desktop mode
+    if(current_mode==MODE_DESKTOP){
+        if(c=='l'||c=='L'){power_lock();return;}
+        if(c=='p'||c=='P'){power_menu_show();return;}
+
+        // Search
+        if(search_active){
+            if(c==27){search_active=0;search_query[0]='\0';search_qpos=0;search_rcount=0;selected_icon=0;desktop_draw();return;}
+            if(c==13&&search_rcount>0){
+                int ai=search_results[selected_icon<search_rcount?selected_icon:0];
+                search_active=0;search_query[0]='\0';search_qpos=0;search_rcount=0;
+                do_launch(ai);desktop_draw();return;
+            }
+            if(c=='A'&&selected_icon>0){selected_icon--;desktop_draw();return;}
+            if(c=='B'&&selected_icon<search_rcount-1){selected_icon++;desktop_draw();return;}
+            if(c==8&&search_qpos>0){search_query[--search_qpos]='\0';do_search();selected_icon=0;desktop_draw();return;}
+            if(c>=32&&c<127&&search_qpos<30){search_query[search_qpos++]=c;search_query[search_qpos]='\0';do_search();selected_icon=0;desktop_draw();return;}
+            return;
+        }
+
+        // Open search
+        if(c=='/'){search_active=1;search_query[0]='\0';search_qpos=0;search_rcount=0;selected_icon=0;desktop_draw();return;}
+
+        // Navigation: left/right within row
+        if(c=='C'){selected_icon=(selected_icon+1)%15;desktop_draw();return;}
+        if(c=='D'){selected_icon=(selected_icon+14)%15;desktop_draw();return;}
+        // Up/down between rows (5 icons per row)
+        if(c=='B'){if(selected_icon+5<15)selected_icon+=5;desktop_draw();return;}
+        if(c=='A'){if(selected_icon-5>=0)selected_icon-=5;desktop_draw();return;}
+        if(c=='\t'){selected_icon=(selected_icon+1)%15;desktop_draw();return;}
+
+        if(c==13){
+            do_launch(selected_icon);
+            desktop_draw();return;
+        }
+    }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────
+void desktop_init(){
+    current_mode=MODE_DESKTOP;
+    selected_icon=0;selected_file=0;trash_count=0;
+    settings_selected=0;settings_scroll=0;settings_section=-1;
+    sound_volume=75;users_selected=0;users_sub=0;
+    search_active=0;search_query[0]='\0';search_qpos=0;
+    u_clear_form();
+    weather_init();
+    screensaver_init();
+    applib_launch_request=-1;
+
+    speaker_play(784);
+    speaker_stop();
+
+    desktop_draw();
+}

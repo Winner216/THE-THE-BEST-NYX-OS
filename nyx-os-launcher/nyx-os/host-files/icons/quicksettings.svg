@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Slider Track Glow (Catppuccin Teal/Green) -->
+    <linearGradient id="trackGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94e2d5" />
+      <stop offset="100%" stop-color="#a6e3a1" />
+    </linearGradient>
+
+    <!-- Slider Knob Glow (Catppuccin Lavender) -->
+    <linearGradient id="knobGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b4befe" />
+      <stop offset="100%" stop-color="#cdd6f4" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.396) translate(-255,-300)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Slider 1 (Volume — left position) -->
+  <line x1="110" y1="210" x2="330" y2="210" stroke="#45475a" stroke-width="18" stroke-linecap="round" />
+  <line x1="110" y1="210" x2="250" y2="210" stroke="url(#trackGlow)" stroke-width="18" stroke-linecap="round" />
+  <circle cx="250" cy="210" r="26" fill="url(#knobGlow)" />
+
+  <!-- Slider 2 (Brightness — center position) -->
+  <line x1="110" y1="300" x2="400" y2="300" stroke="#45475a" stroke-width="18" stroke-linecap="round" />
+  <line x1="110" y1="300" x2="290" y2="300" stroke="url(#trackGlow)" stroke-width="18" stroke-linecap="round" />
+  <circle cx="290" cy="300" r="26" fill="url(#knobGlow)" />
+
+  <!-- Slider 3 (Wifi — right position) -->
+  <line x1="110" y1="390" x2="400" y2="390" stroke="#45475a" stroke-width="18" stroke-linecap="round" />
+  <line x1="110" y1="390" x2="360" y2="390" stroke="url(#trackGlow)" stroke-width="18" stroke-linecap="round" />
+  <circle cx="360" cy="390" r="26" fill="url(#knobGlow)" />
+
+  </g>
+</svg>

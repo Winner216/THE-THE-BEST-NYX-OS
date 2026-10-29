@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    
+
+    <!-- Accent Glow for Main Folder (Catppuccin Blue/Sapphire) -->
+    <linearGradient id="folderGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#74c7ec" />
+    </linearGradient>
+
+    <!-- Glowing Plus Badge (Catppuccin Peach/Yellow) -->
+    <linearGradient id="plusGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fab387" />
+      <stop offset="100%" stop-color="#f9e2af" />
+    </linearGradient>
+
+    
+  </defs>
+  <!-- Center + scale the glyph to fill the canvas (background removed) -->
+  <g transform="translate(256,256) scale(1.433) translate(-236,-322)">
+
+
+
+  
+
+  
+
+  
+
+  <!-- Back Secondary File/Folder (Layered Effect) -->
+  <path d="M 160 210 L 220 210 L 245 235 L 360 235 C 375 235 385 245 385 260 L 385 370 C 385 385 375 395 360 395 L 160 395 C 145 395 135 385 135 370 L 135 235 C 135 220 145 210 160 210 Z" 
+        fill="#313244" opacity="0.6" />
+
+  <!-- Front Primary Folder -->
+  <path d="M 120 235 L 185 235 L 210 260 L 330 260 C 345 260 355 270 355 285 L 355 400 C 355 415 345 425 330 425 L 120 425 C 105 425 95 415 95 400 L 95 260 C 95 245 105 235 120 235 Z" 
+        fill="none" stroke="url(#folderGlow)" stroke-width="18" stroke-linejoin="round" stroke-linecap="round" />
+
+  <!-- 'Plus / Too' Badge (Symbolizing additional files/actions) -->
+  <g transform="translate(290, 290)">
+    <!-- Badge Background Circle -->
+    <circle cx="45" cy="45" r="45" fill="#1e1e2e" stroke="#313244" stroke-width="4" />
+    
+    <!-- Plus Icon -->
+    <line x1="45" y1="23" x2="45" y2="67" stroke="url(#plusGlow)" stroke-width="12" stroke-linecap="round" />
+    <line x1="23" y1="45" x2="67" y2="45" stroke="url(#plusGlow)" stroke-width="12" stroke-linecap="round" />
+  </g>
+
+  </g>
+</svg>

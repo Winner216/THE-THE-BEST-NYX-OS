@@ -1,0 +1,3 @@
+version: 1.0
+author: Nyx Core
+desc: Web fetch — real HTTP GET to example.com from ring 3 over the socket syscalls.

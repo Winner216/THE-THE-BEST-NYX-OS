@@ -1,0 +1,3 @@
+version: 1.0
+author: Nyx Core
+desc: Calculator — pi (100 digits), sqrt2, primes, Fibonacci & factorials computed from scratch.
