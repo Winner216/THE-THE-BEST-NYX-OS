@@ -1,13 +1,14 @@
 # Nyx OS
 
 A custom 32-bit x86 operating system built from scratch in C and assembly, running as a hobbyist teaching/demonstration OS in QEMU (and potentially on real hardware). Boots via GRUB/Multiboot, initializes a full graphical desktop with a compositing window manager, and includes a wide set of built-in applications, drivers, network stacks, multimedia decoders, and a package/app-store system.
+```text
 ███╗   ██╗██╗   ██╗██╗  ██╗     ██████╗ ███████╗
 ████╗  ██║╚██╗ ██╔╝╚██╗██╔╝    ██╔═══██╗██╔════╝
 ██╔██╗ ██║ ╚████╔╝  ╚███╔╝     ██║   ██║███████╗
 ██║╚██╗██║  ╚██╔╝   ██╔██╗     ██║   ██║╚════██║
 ██║ ╚████║   ██║   ██╔╝ ██╗    ╚██████╔╝███████║
-╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝     ╚═════╝ ╚══════╝  
-  
+╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝     ╚═════╝ ╚══════╝
+```
 ---
 
 ## Table of Contents
